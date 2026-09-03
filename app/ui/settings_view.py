@@ -8,7 +8,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout, QWidget,
 )
 
-from .. import storage
+from .. import security, storage
 from ..billing import DEFAULT_BILL_NOTES
 from ..models import LabProfile
 from .. import validators as V
@@ -187,6 +187,7 @@ class SettingsView(QWidget):
         layout.setContentsMargins(0, 2, 2, 2)
         layout.addWidget(box)
         layout.addWidget(preview_box)
+        layout.addWidget(self._build_security_box())
         layout.addStretch(1)
 
         scroll = QScrollArea()
@@ -212,6 +213,90 @@ class SettingsView(QWidget):
         outer.addLayout(buttons)
 
         self.load()
+
+    # ------------------------------------------------------------- security
+    def _build_security_box(self) -> Card:
+        """The edit password lives here rather than only behind a locked report.
+
+        Before this, a password could be set but never changed and never
+        cleared: the app had no screen for either, so a forgotten one left the
+        lab unable to edit or delete anything ever again."""
+        card = Card("Edit Password",
+                    "asked before a saved report is edited or deleted",
+                    elevated=False)
+
+        self.security_state = QLabel("")
+        self.security_state.setWordWrap(True)
+        self.security_state.setObjectName("Hint")
+        card.add(self.security_state)
+
+        row = QHBoxLayout()
+        row.setSpacing(S2)
+        self.password_button = icon_button("lock", "Set Password", "")
+        self.password_button.clicked.connect(self._change_password)
+        row.addWidget(self.password_button)
+
+        self.forgot_button = icon_button(
+            "unlock", "Forgot Password?",
+            "Clear a password nobody remembers, then set a new one", "Danger")
+        self.forgot_button.clicked.connect(self._forgot_password)
+        row.addWidget(self.forgot_button)
+
+        folder = icon_button("open", "Open Data Folder",
+                             "Show the folder holding the reports and settings")
+        folder.clicked.connect(self._open_data_folder)
+        row.addWidget(folder)
+        row.addStretch(1)
+        card.add(row)
+        self._refresh_security()
+        return card
+
+    def _refresh_security(self):
+        """Say which state the app is in - the buttons alone do not."""
+        is_set = security.is_set()
+        self.password_button.setText("Change Password" if is_set
+                                     else "Set Password")
+        self.password_button.setToolTip(
+            "Change the password, proving the current one first" if is_set
+            else "Set the password that will guard edits and deletes")
+        self.forgot_button.setEnabled(is_set)
+        self.security_state.setText(
+            "A password is set. Saved reports open read-only and ask for it "
+            "before an edit or a delete. It is stored as a PBKDF2-SHA256 hash "
+            "and cannot be read back - if it is forgotten, use Forgot "
+            "Password? to clear it and set a new one."
+            if is_set else
+            "No password is set. Saved reports still open read-only, but "
+            "unlocking one will ask you to set a password first. Set one now "
+            "if more than one person uses this machine."
+        )
+
+    def _change_password(self):
+        from .password_dialog import change_password_flow
+
+        if change_password_flow(self):
+            self._refresh_security()
+            self.notify.emit("Edit password saved.", "success")
+
+    def _forgot_password(self):
+        from .password_dialog import reset_password_flow
+
+        changed = reset_password_flow(self)
+        self._refresh_security()
+        if changed and security.is_set():
+            self.notify.emit("Password cleared and a new one set.", "success")
+        elif not security.is_set():
+            self.notify.emit(
+                "Password cleared. The next edit or delete will ask you to set "
+                "a new one.", "warning")
+
+    @staticmethod
+    def _open_data_folder():
+        from PySide6.QtCore import QUrl
+        from PySide6.QtGui import QDesktopServices
+
+        storage.ensure_dirs()
+        QDesktopServices.openUrl(QUrl.fromLocalFile(storage.app_dir()))
 
     def load(self):
         profile = storage.load_profile()

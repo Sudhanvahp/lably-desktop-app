@@ -7,12 +7,12 @@ differently.
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
-    QFrame, QGraphicsDropShadowEffect, QHBoxLayout, QLabel, QPushButton,
-    QSizePolicy, QVBoxLayout, QWidget,
+    QFrame, QGraphicsDropShadowEffect, QHBoxLayout, QLabel, QLineEdit,
+    QPushButton, QSizePolicy, QStyledItemDelegate, QVBoxLayout, QWidget,
 )
 
 from . import icons
-from .theme import ACCENT, MUTED, S2, S3, S4
+from .theme import (ACCENT, FAINT, GRID_LINE, INK, MUTED, S2, S3, S4)
 
 
 def shadow(widget: QWidget, blur: int = 22, dy: int = 3, alpha: int = 26):
@@ -193,4 +193,72 @@ def accent_icon_button(icon_name: str, text: str, tooltip: str = "") -> QPushBut
 
 
 __all__ = ["Card", "PageHeader", "StatTile", "EmptyState", "shadow", "hrule",
-           "icon_button", "accent_icon_button", "ACCENT", "S2", "S3", "S4"]
+           "icon_button", "accent_icon_button", "AmountDelegate",
+           "ACCENT", "S2", "S3", "S4"]
+
+
+class AmountDelegate(QStyledItemDelegate):
+    """Paints a money cell as an obvious input box.
+
+    A bare table cell gives the operator nothing to aim at: the amount column
+    looked like the read-only service name beside it, and the only way to find
+    out it could be typed in was to try. So the cell is drawn as a bordered
+    white box with a grey `0.00` inside it while it is empty - the same
+    affordance every other editable field on the page has - and the figure is
+    set bold and right-aligned once it is filled, so a column of amounts reads
+    down its decimal point.
+
+    The box is painted rather than styled because a Qt stylesheet on
+    QTableWidget::item takes over item rendering and drops the model's own
+    background brush, so a tint set on the item would simply never appear.
+    """
+
+    HINT = "0.00"
+
+    def __init__(self, parent=None, validator_pattern: str = "", hint: str = ""):
+        super().__init__(parent)
+        self.validator_pattern = validator_pattern
+        self.hint = hint or self.HINT
+
+    def paint(self, painter, option, index):
+        from PySide6.QtGui import QPainter, QPen
+
+        text = str(index.data(Qt.DisplayRole) or "")
+        rect = option.rect.adjusted(4, 3, -5, -4)
+
+        painter.save()
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setPen(QPen(QColor(GRID_LINE), 1.4))
+        painter.setBrush(QColor("#ffffff"))
+        painter.drawRoundedRect(rect, 5, 5)
+
+        font = painter.font()
+        if text.strip():
+            font.setBold(True)
+            painter.setFont(font)
+            # The model's own colour carries the red on an unusable amount.
+            brush = index.data(Qt.ForegroundRole)
+            painter.setPen(brush.color() if brush is not None else QColor(INK))
+            shown = text
+        else:
+            painter.setFont(font)
+            painter.setPen(QColor(FAINT))
+            shown = self.hint
+        painter.drawText(rect.adjusted(6, 0, -7, 0),
+                         Qt.AlignRight | Qt.AlignVCenter, shown)
+        painter.restore()
+
+    def createEditor(self, parent, option, index):
+        editor = QLineEdit(parent)
+        editor.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        editor.setPlaceholderText(self.hint)
+        if self.validator_pattern:
+            from .. import validators as V
+
+            editor.setValidator(V.validator(self.validator_pattern, editor))
+        return editor
+
+    def sizeHint(self, option, index):
+        size = super().sizeHint(option, index)
+        size.setHeight(max(size.height(), 30))
+        return size

@@ -15,7 +15,7 @@ from .. import billing, printing, storage
 from . import icons
 from .theme import ACCENT, ACCENT_DARK, DANGER, MUTED, S2, S3, SURFACE_ALT
 from . import theme as T
-from .widgets import Card, PageHeader, hrule, icon_button
+from .widgets import AmountDelegate, Card, PageHeader, hrule, icon_button
 from ..models import BillItem, Billing, Report, TestRow
 from ..panels import flag_for
 from .. import templates
@@ -59,6 +59,15 @@ FIELD_HELP = {
 class ReportForm(QWidget):
     saved = Signal()
     notify = Signal(str, str)   # (message, kind)
+
+    # The bill's amount boxes open on a single click. Typing a bill is a run of
+    # short numeric edits, and needing a double-click for each one is both slow
+    # and the reason the column read as if it could not be typed into at all.
+    BILL_TRIGGERS = (QAbstractItemView.CurrentChanged
+                     | QAbstractItemView.DoubleClicked
+                     | QAbstractItemView.SelectedClicked
+                     | QAbstractItemView.EditKeyPressed
+                     | QAbstractItemView.AnyKeyPressed)
 
     def __init__(self):
         super().__init__()
@@ -390,8 +399,13 @@ class ReportForm(QWidget):
                    elevated=False)
 
         self.table = QTableWidget(0, len(COLS))
+        self.table.setObjectName("GridTable")
         self.table.setHorizontalHeaderLabels(COLS)
-        self.table.verticalHeader().setDefaultSectionSize(26)
+        # Ruled like a worksheet: the operator types a value into one cell and
+        # reads it back against a range three columns away, which needs a line
+        # to follow rather than a tint.
+        self.table.setShowGrid(True)
+        self.table.verticalHeader().setDefaultSectionSize(30)
         self.table.setSelectionBehavior(QAbstractItemView.SelectItems)
         self.table.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.table.setAlternatingRowColors(True)
@@ -440,10 +454,16 @@ class ReportForm(QWidget):
 
     def _amount_field(self, width: int = 130) -> QLineEdit:
         field = QLineEdit()
+        field.setObjectName("AmountField")
         field.setValidator(V.validator(V.AMOUNT_PATTERN, self))
         field.setPlaceholderText("0.00")
         field.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         field.setFixedWidth(width)
+        # Money is read, checked and re-read at the counter, so it is set larger
+        # than body text and given a box of its own height to sit in.
+        field.setMinimumHeight(34)
+        field.setToolTip("What the patient has paid against this bill. "
+                         "Leave blank if nothing has been paid yet.")
         return field
 
     def _build_bill_box(self) -> Card:
@@ -487,15 +507,24 @@ class ReportForm(QWidget):
         box.add(head)
 
         self.bill_table = QTableWidget(0, len(BILL_COLS))
+        self.bill_table.setObjectName("GridTable")
         self.bill_table.setHorizontalHeaderLabels(BILL_COLS)
+        self.bill_table.setShowGrid(True)
         self.bill_table.verticalHeader().setVisible(False)
-        self.bill_table.verticalHeader().setDefaultSectionSize(26)
+        self.bill_table.verticalHeader().setDefaultSectionSize(34)
         self.bill_table.setSelectionBehavior(QAbstractItemView.SelectItems)
         self.bill_table.setAlternatingRowColors(True)
         bill_header = self.bill_table.horizontalHeader()
         bill_header.setSectionResizeMode(0, QHeaderView.Stretch)
         bill_header.setSectionResizeMode(1, QHeaderView.Fixed)
-        self.bill_table.setColumnWidth(1, 150)
+        self.bill_table.setColumnWidth(1, 170)
+        # The amount column is the only thing on this card the operator types,
+        # so it is drawn as a box with a 0.00 in it rather than as a bare cell.
+        self.bill_table.setItemDelegateForColumn(
+            1, AmountDelegate(self.bill_table, V.AMOUNT_PATTERN))
+        # One click into the box starts typing: an amount is a two-second edit
+        # and a double-click requirement is felt on every single bill.
+        self.bill_table.setEditTriggers(self.BILL_TRIGGERS)
         self.bill_table.itemChanged.connect(self._bill_item_changed)
         box.add(self.bill_table)
 
@@ -569,7 +598,19 @@ class ReportForm(QWidget):
         caption("Net Deposit", 2)
         self.f_deposit = self._amount_field()
         self.f_deposit.textChanged.connect(self._update_bill_totals)
-        grid.addWidget(self.f_deposit, 2, 1)
+        # The sign sits outside the box: inside it, the operator has to type
+        # around it, and the amount validator would reject it anyway.
+        deposit_row = QWidget()
+        deposit_row.setObjectName("Bare")
+        deposit_line = QHBoxLayout(deposit_row)
+        deposit_line.setContentsMargins(0, 0, 0, 0)
+        deposit_line.setSpacing(S2 - 2)
+        deposit_line.addStretch(1)
+        rupee = QLabel(billing.CURRENCY)
+        rupee.setObjectName("AmountSign")
+        deposit_line.addWidget(rupee)
+        deposit_line.addWidget(self.f_deposit)
+        grid.addWidget(deposit_row, 2, 1)
 
         # The description belongs directly under the field it describes, the way
         # every other field on the page carries its one line of plain English.
@@ -817,7 +858,10 @@ class ReportForm(QWidget):
                     | QAbstractItemView.EditKeyPressed
                     | QAbstractItemView.AnyKeyPressed)
         self.table.setEditTriggers(triggers)
-        self.bill_table.setEditTriggers(triggers)
+        # The bill keeps its single-click editing: an amount box that needs a
+        # double-click reads as read-only, which is the confusion this fixes.
+        self.bill_table.setEditTriggers(
+            QAbstractItemView.NoEditTriggers if locked else self.BILL_TRIGGERS)
         for button in self.edit_buttons:
             button.setEnabled(not locked)
 

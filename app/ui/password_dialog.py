@@ -104,14 +104,106 @@ class AskPasswordDialog(_Base):
         self.password.setFocus()
         self.attempts = 0
 
+        # A forgotten password used to be a dead end with no way out and no
+        # explanation on screen - the recovery step was only written down in a
+        # source comment. The way out is offered where it is needed.
+        forgot = self.buttons.addButton("Forgot password?",
+                                        QDialogButtonBox.HelpRole)
+        forgot.setToolTip("What to do if nobody remembers the password")
+        forgot.clicked.connect(self._forgot)
+
+    def _forgot(self):
+        if reset_password_flow(self, from_unlock=True):
+            self.accept()
+
     def _submit(self):
         if security.verify(self.password.text()):
             self.accept()
             return
         self.attempts += 1
-        self._show_error("That password is not correct.")
+        self._show_error("That password is not correct. Use Forgot password? "
+                         "if nobody remembers it.")
         self.password.selectAll()
         self.password.setFocus()
+
+
+RESET_WORD = "RESET"
+
+RESET_EXPLANATION = (
+    "The password is stored only as a PBKDF2-SHA256 hash, so it cannot be "
+    "read back out of the app - not by you and not by us. Nobody can recover "
+    "the password itself.\n\n"
+    "What can be done is to clear it and set a new one. This does not touch a "
+    "single report: reports are plain files in the data folder and the "
+    "password never encrypted them - it only asks before an edit or a delete. "
+    "Anyone who can open that folder could already clear it by deleting "
+    "security.json, so doing it here through a typed confirmation is no weaker "
+    "and leaves the operator a way back.\n\n"
+    f"Type {RESET_WORD} below to clear the password. The very next edit or "
+    "delete will then ask you to set a new one."
+)
+
+
+class ResetPasswordDialog(_Base):
+    """The way back from a forgotten password: clear it, then set a new one.
+
+    Guarded by a typed word rather than a click, so it cannot be walked into by
+    someone dismissing dialogs, and it says plainly what it does and does not
+    protect."""
+
+    def __init__(self, parent):
+        super().__init__(parent, "Forgotten password", RESET_EXPLANATION)
+        self.word = QLineEdit()
+        self.word.setPlaceholderText(RESET_WORD)
+        self.word.setMinimumHeight(34)
+        self.word.returnPressed.connect(self._submit)
+        self.form.addRow(f"Type {RESET_WORD}:", self.word)
+        self.word.setFocus()
+
+        folder = self.buttons.addButton("Open Data Folder",
+                                        QDialogButtonBox.ActionRole)
+        folder.setToolTip("Show the folder holding security.json and the reports")
+        folder.clicked.connect(self._open_folder)
+
+        self.buttons.button(QDialogButtonBox.Ok).setText("Clear Password")
+
+    @staticmethod
+    def _open_folder():
+        from PySide6.QtCore import QUrl
+        from PySide6.QtGui import QDesktopServices
+
+        from .. import storage
+
+        storage.ensure_dirs()
+        QDesktopServices.openUrl(QUrl.fromLocalFile(storage.app_dir()))
+
+    def _submit(self):
+        if self.word.text().strip().upper() != RESET_WORD:
+            self._show_error(f"Type {RESET_WORD} exactly, to confirm.")
+            self.word.selectAll()
+            self.word.setFocus()
+            return
+        security.clear_password()
+        self.accept()
+
+
+def reset_password_flow(parent, from_unlock: bool = False) -> bool:
+    """Clear a forgotten password and offer to set the replacement at once.
+
+    Returns True when a new password was set, or - when this came from an unlock
+    prompt - when the operator is entitled to carry on with what they were
+    doing. Leaving without setting one is allowed: an unprotected app is the
+    state a new install is in, and refusing to continue would strand the lab.
+    """
+    if ResetPasswordDialog(parent).exec() != QDialog.Accepted:
+        return False
+    return SetPasswordDialog(parent).exec() == QDialog.Accepted or from_unlock
+
+
+def change_password_flow(parent) -> bool:
+    """Set the first password, or change one the operator still knows."""
+    return SetPasswordDialog(
+        parent, changing=security.is_set()).exec() == QDialog.Accepted
 
 
 def request_unlock(parent, action: str = "edit this report") -> bool:

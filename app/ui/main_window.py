@@ -1,17 +1,19 @@
 """Application shell: sidebar rail on the left, one page at a time on the right."""
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import (
     QHBoxLayout, QLabel, QMainWindow, QStackedWidget, QVBoxLayout, QWidget,
 )
 
 from .. import storage
-from ..branding import APP_NAME, APP_TAGLINE, APP_VERSION, NAV_TAGLINE
+from ..branding import (APP_NAME, APP_TAGLINE, APP_VERSION, NAV_TAGLINE,
+                        ORIGIN, VENDOR, footer_meta)
 from .history_view import HistoryView
 from .report_form import ReportForm
 from .settings_view import SettingsView
 from .templates_view import TemplatesView
 from .sidebar import Sidebar
-from .theme import S3, S4
+from .theme import S2, S3, S4
 from .toast import Toast
 
 NEW, HISTORY, TEMPLATES, SETTINGS = 0, 1, 2, 3
@@ -39,7 +41,11 @@ class MainWindow(QMainWindow):
         body = QWidget()
         body_layout = QVBoxLayout(body)
         body_layout.setContentsMargins(S4, S4, S4, S3)
-        body_layout.addWidget(self.stack)
+        # The stack takes the stretch and the footer sits under it, outside the
+        # stack, so one footer serves all four pages rather than each page
+        # carrying its own copy.
+        body_layout.addWidget(self.stack, 1)
+        body_layout.addWidget(self._build_footer())
 
         central = QWidget()
         central.setObjectName("Canvas")
@@ -67,6 +73,31 @@ class MainWindow(QMainWindow):
         self.statusBar().addPermanentWidget(QLabel(f"Data folder: {storage.app_dir()}   "))
         self._refresh_lab_name()
         self._prompt_first_run()
+
+    # ---------------------------------------------------------------- footer
+    def _build_footer(self) -> QWidget:
+        """Vendor name over version / origin / release stage, centred.
+
+        Deliberately quiet: it is a signature, not a control, so it is small,
+        muted and never competes with the page above it."""
+        holder = QWidget()
+        holder.setObjectName("Bare")
+        column = QVBoxLayout(holder)
+        column.setContentsMargins(0, S2, 0, 0)
+        column.setSpacing(0)
+
+        name = QLabel(VENDOR)
+        name.setObjectName("AppFooterName")
+        name.setAlignment(Qt.AlignCenter)
+
+        meta = QLabel(footer_meta())
+        meta.setObjectName("AppFooterMeta")
+        meta.setAlignment(Qt.AlignCenter)
+        meta.setToolTip(f"{APP_NAME} {APP_VERSION} - {ORIGIN}")
+
+        column.addWidget(name)
+        column.addWidget(meta)
+        return holder
 
     # ------------------------------------------------------------------ menu
     def _build_menu(self):

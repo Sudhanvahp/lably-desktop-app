@@ -18,6 +18,11 @@ SURFACE_ALT = "#f7f9fc"  # zebra rows, inset panels
 LINE = "#e2e9f1"         # hairlines
 FIELD_LINE = "#cfd9e5"   # input borders
 
+# Ruled grids: the results and bill worksheets are read cell by cell, so
+# their lines are near-black rather than the hairline used elsewhere.
+GRID_LINE = "#101a26"    # black rules between rows and columns
+GRID_HEAD = "#dfe6ee"    # header band behind the black rules
+
 # Deep teal reads clinical without being the usual hospital blue.
 NAVY = "#0b2a3a"         # sidebar
 NAVY_DEEP = "#071e2b"
@@ -303,6 +308,41 @@ QTableWidget::indicator:checked {{
     image: url("__CHECK__");
 }}
 
+/* ------------------------------------------------- ruled data-entry grids */
+/* The results grid and the bill are worksheets: the operator types into them,
+   reads a value back against its row, and checks a column of figures down the
+   page. Hairlines are right for a list you only read - here the cell itself has
+   to be findable, so these two tables get a ruled black grid, rows and columns
+   both, and the header is boxed in the same ink. */
+QTableWidget#GridTable {{
+    gridline-color: {GRID_LINE};
+    border: 2px solid {GRID_LINE};
+    border-radius: 6px;
+    background: {SURFACE};
+    alternate-background-color: {SURFACE_ALT};
+}}
+QTableWidget#GridTable::item {{
+    padding: 5px 8px;
+    border: none;
+    border-right: 1px solid {GRID_LINE};
+    border-bottom: 1px solid {GRID_LINE};
+    color: {INK};
+}}
+QTableWidget#GridTable::item:selected {{
+    background: {ACCENT_SOFT};
+    color: {INK};
+}}
+QTableWidget#GridTable QHeaderView::section {{
+    background: {GRID_HEAD};
+    color: {INK};
+    font-weight: 700;
+    border: none;
+    border-right: 1px solid {GRID_LINE};
+    border-bottom: 2px solid {GRID_LINE};
+    padding: 9px 8px;
+}}
+QTableWidget#GridTable QHeaderView::section:last {{ border-right: none; }}
+
 /* ------------------------------------------------------------------ lists */
 QListWidget {{
     background: {SURFACE};
@@ -452,6 +492,28 @@ QLabel#KeyValue {{
     border-radius: 10px;
 }}
 #BillTotals QLabel {{ background: transparent; }}
+/* An amount box is the one field on the page that money is typed into, so it
+   is ruled in the same black as the grids and set in a size that survives a
+   glance across the counter. */
+QLineEdit#AmountField {{
+    border: 2px solid {GRID_LINE};
+    border-radius: 6px;
+    background: #ffffff;
+    font-size: 12pt;
+    font-weight: 700;
+    color: {INK};
+    padding: 4px 9px;
+}}
+QLineEdit#AmountField:focus {{
+    border: 2px solid {ACCENT};
+    background: {ACCENT_TINT};
+}}
+QLineEdit#AmountField:read-only {{
+    background: {SURFACE_ALT};
+    border: 2px solid {FIELD_LINE};
+    color: {INK_SOFT};
+}}
+QLabel#AmountSign {{ color: {INK}; font-size: 12pt; font-weight: 700; }}
 QLabel#BillLabel {{ color: {MUTED}; font-size: 9.5pt; }}
 QLabel#BillLabelStrong {{
     color: {INK_SOFT}; font-size: 9pt; font-weight: 700; letter-spacing: 1.2px;
@@ -467,6 +529,15 @@ QLabel#BillBalance {{
 QLabel#BillBalanceClear {{
     color: {SUCCESS}; font-size: 13pt; font-weight: 700; font-family: {MONO};
 }}
+
+/* ----------------------------------------------------------- app footer */
+QLabel#AppFooterName {{
+    color: {MUTED};
+    font-size: 9.5pt;
+    font-weight: 700;
+    letter-spacing: 2.5px;
+}}
+QLabel#AppFooterMeta {{ color: {FAINT}; font-size: 8pt; letter-spacing: 1.1px; }}
 
 QLabel#EmptyTitle {{ font-size: 13pt; font-weight: 600; color: {INK_SOFT}; }}
 QLabel#EmptyBody {{ font-size: 10pt; color: {MUTED}; }}
