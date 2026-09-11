@@ -1,4 +1,4 @@
-"""Local-storage layer: JSON files under %APPDATA%\BloodReportApp plus an in-memory cache.
+r"""Local-storage layer: JSON files under %APPDATA%\BloodReportApp plus an in-memory cache.
 
 Deliberately no database. Every write is atomic (write .tmp then os.replace) so an
 interrupted save can never leave a half-written report behind.
@@ -7,6 +7,8 @@ import json
 import os
 import shutil
 import uuid
+import re
+import string
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -255,6 +257,197 @@ def save_report(report: Report) -> Report:
     idx.append(report.index_entry())
     _save_index(idx)
     return report
+
+
+# --------------------------------------------------------------------------
+# backup to a synced folder (Google Drive for desktop, OneDrive, ...)
+# --------------------------------------------------------------------------
+# Google Drive for desktop mounts the account as a drive letter holding
+# "My Drive", or (older installs / mirror mode) as a folder under the profile.
+_DRIVE_ROOT_NAMES = ("My Drive", "Google Drive")
+
+
+def find_google_drive() -> str:
+    """The local folder Google Drive for desktop syncs, or "" if there is none.
+
+    Looked for rather than asked about: the operator at a lab counter does not
+    know where Drive keeps its folder, but they do know whether it is installed."""
+    candidates: List[str] = []
+    home = os.path.expanduser("~")
+    for letter in string.ascii_uppercase:
+        candidates.append(f"{letter}:\\My Drive")
+    for name in _DRIVE_ROOT_NAMES:
+        candidates.append(os.path.join(home, name))
+    for path in candidates:
+        if os.path.isdir(path):
+            return path
+    return ""
+
+
+def is_google_drive_path(path: str) -> bool:
+    parts = [part.lower() for part in re.split(r"[\\/]+", path or "")]
+    return any(name.lower() in parts for name in _DRIVE_ROOT_NAMES)
+
+
+def check_backup_dir(path: str) -> Optional[str]:
+    """Why this folder cannot be used for backup, or None if it can.
+
+    A blank means 'no backup' and is always fine. Otherwise the folder must
+    exist (or be creatable) and be writable now, so a typo is caught at Save
+    Profile rather than silently losing every backup afterwards."""
+    path = (path or "").strip()
+    if not path:
+        return None
+    # A relative path would land somewhere different depending on how the app
+    # was started (run.bat vs the exe), so only a full path is accepted.
+    if not os.path.isabs(path):
+        return "Give the full path of the backup folder, e.g. G:\\My Drive\\Lably."
+    own = os.path.normcase(os.path.abspath(app_dir()))
+    given = os.path.normcase(os.path.abspath(path))
+    if given == own or given.startswith(own + os.sep):
+        return "The backup folder must be outside the app's own data folder."
+    try:
+        os.makedirs(path, exist_ok=True)
+        probe = os.path.join(path, ".lably-write-test")
+        with open(probe, "w", encoding="utf-8") as fh:
+            fh.write("ok")
+        os.remove(probe)
+    except (OSError, ValueError) as exc:
+        return f"Cannot write to the backup folder: {getattr(exc, 'strerror', None) or exc}"
+    return None
+
+
+def backup_dir() -> str:
+    return (load_profile().backup_dir or "").strip()
+
+
+def should_ask_for_backup() -> bool:
+    """Whether Save should offer Google Drive: no folder chosen yet, and the
+    operator has not told the app to stop asking."""
+    profile = load_profile()
+    return not (profile.backup_dir or "").strip() and profile.backup_declined != "1"
+
+
+def set_backup_dir(path: str) -> None:
+    profile = load_profile()
+    profile.backup_dir = path.strip()
+    profile.backup_declined = ""
+    save_profile(profile)
+
+
+def decline_backup_prompt() -> None:
+    profile = load_profile()
+    profile.backup_declined = "1"
+    save_profile(profile)
+
+
+DRIVE_DOWNLOAD_URL = "https://www.google.com/drive/download/"
+DRIVE_WEB_URL = "https://drive.google.com/"
+
+
+def open_backup_folder() -> bool:
+    """Show the backup folder in Explorer, creating it if it is not there yet.
+    Returns False when backup is off or the folder cannot be reached."""
+    from PySide6.QtCore import QUrl
+    from PySide6.QtGui import QDesktopServices
+
+    folder = backup_dir()
+    if not folder:
+        return False
+    try:
+        os.makedirs(folder, exist_ok=True)
+    except OSError:
+        return False
+    return QDesktopServices.openUrl(QUrl.fromLocalFile(folder))
+
+
+def backup_month_dir(folder: str, report: Report) -> str:
+    """Where this report's copies live: <folder>\\2026\\09-September.
+
+    One folder per year, one per month inside it, so a year of reports in
+    Drive is a dozen folders rather than a few thousand files - and the month
+    is what a lab remembers when a patient comes back asking for a copy. The
+    month is the one the report was made in, so a report never moves once
+    filed, even if it is edited later."""
+    when = None
+    try:
+        when = datetime.fromisoformat(report.created_at)
+    except (TypeError, ValueError):
+        pass
+    if when is None:
+        when = datetime.now()
+    return os.path.join(folder, f"{when:%Y}", f"{when:%m-%B}")
+
+
+def backup_name(report: Report) -> str:
+    """A file name a person can find in Drive: report number and patient name,
+    reduced to characters every filesystem and sync client accepts."""
+    name = re.sub(r"[^A-Za-z0-9]+", "-", report.patient_name).strip("-")
+    stem = "-".join(part for part in (report.report_no, name) if part)
+    return stem or report.id
+
+
+def _stale_backup_stems(folder: str, report: Report) -> List[str]:
+    """Names (without extension) of earlier copies of *this* report in the
+    backup folder that no longer match its current name.
+
+    The file is named after the patient, so correcting a misspelt name and
+    saving again would otherwise leave both spellings in Drive - and the wrong
+    one is the one somebody will eventually send out. A candidate has to start
+    with the report number *and* carry this report's own id inside, so a copy
+    from another PC that happens to reuse the number is never touched."""
+    keep = backup_name(report)
+    prefix = report.report_no + "-"
+    if not report.report_no:
+        return []
+    stale = []
+    try:
+        names = os.listdir(folder)
+    except OSError:
+        return []
+    for name in names:
+        stem, ext = os.path.splitext(name)
+        if ext != ".json" or stem == keep or not stem.startswith(prefix):
+            continue
+        data = _read_json(os.path.join(folder, name), None)
+        if isinstance(data, dict) and data.get("id") == report.id:
+            stale.append(stem)
+    return stale
+
+
+def _remove_quietly(path: str) -> None:
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+
+
+def backup_copy(report: Report) -> Optional[str]:
+    """Copy the report's data file into its month folder under the backup
+    folder, retiring any copy of the same report saved under an earlier name
+    (and its PDF twin).
+
+    The PDF sits directly in the month folder - that is what the lab browses
+    in Drive - and the data file, which only the app reads, in `data` under
+    it. Returns the month folder written to, or None when backup is off or
+    unwritable. Never raises: a missing USB stick or a paused Drive must not
+    stop the report saving on this PC - the local file is the record, the
+    copy is a convenience."""
+    folder = backup_dir()
+    if not folder:
+        return None
+    try:
+        month = backup_month_dir(folder, report)
+        dest = os.path.join(month, "data")
+        os.makedirs(dest, exist_ok=True)
+        for stem in _stale_backup_stems(dest, report):
+            _remove_quietly(os.path.join(dest, stem + ".json"))
+            _remove_quietly(os.path.join(month, stem + ".pdf"))
+        shutil.copyfile(os.path.join(reports_dir(), report.id + ".json"),
+                        os.path.join(dest, backup_name(report) + ".json"))
+        return month
+    except OSError:
+        return None
 
 
 def load_report(report_id: str) -> Optional[Report]:

@@ -87,6 +87,12 @@ def _spacer(pt: int = 6) -> str:
 
 
 def letterhead(lab: LabProfile) -> str:
+    """The identity block, centred on the page with the logo off to the left.
+
+    Everything the lab wants a patient to be able to read off the top of the
+    report is here: name, address, the numbers to ring, the hours it is open
+    and who to call when it is shut. A blank field prints nothing - no stray
+    label, no empty line."""
     logo = _data_uri(lab.logo_path)
     logo_cell = (
         f'<td width="96" valign="middle" style="padding-right:14px;">'
@@ -96,25 +102,37 @@ def letterhead(lab: LabProfile) -> str:
     )
     name = escape(lab.lab_name or "LABORATORY NAME")
 
-    left: List[str] = [f'<div class="labname">{name}</div>']
+    lines: List[str] = [f'<div class="labname" align="center">{name}</div>']
     for txt in (lab.address1, lab.address2):
         if txt:
-            left.append(f'<div class="sub">{escape(txt)}</div>')
+            lines.append(f'<div class="sub" align="center">{escape(txt)}</div>')
 
-    right: List[str] = []
-    for label, value in (("Tel", lab.phone), ("Mob", lab.mobile),
-                         ("Email", lab.email), ("Reg. No", lab.reg_no)):
-        if value:
-            right.append(
-                f'<div class="sub"><span class="subkey">{label}</span>'
-                f'&nbsp;&nbsp;{escape(value)}</div>'
-            )
+    def keyed(pairs) -> str:
+        """One centred line of `Label  value` pairs, set apart by dots."""
+        parts = [
+            f'<span class="subkey">{label}</span>&nbsp;&nbsp;{escape(value)}'
+            for label, value in pairs if value
+        ]
+        return "&nbsp;&nbsp;&middot;&nbsp;&nbsp;".join(parts)
 
+    contact = keyed((("Tel", lab.phone), ("Mob", lab.mobile),
+                     ("Email", lab.email), ("Reg. No", lab.reg_no)))
+    if contact:
+        lines.append(f'<div class="sub" align="center">{contact}</div>')
+
+    hours = keyed((("Timings", lab.timings), ("Holidays", lab.holidays)))
+    if hours:
+        lines.append(f'<div class="hours" align="center">{hours}</div>')
+
+    # The logo sits in a column of its own and an empty column of the same
+    # width balances it on the right, so the text block is centred on the page
+    # rather than on whatever room the logo leaves over.
+    balance = '<td width="96">&nbsp;</td>' if logo else ""
     return (
         '<table width="100%" cellpadding="0" cellspacing="0"><tr>'
         + logo_cell
-        + '<td valign="middle">' + "".join(left) + "</td>"
-        + '<td valign="middle" align="right" width="30%">' + "".join(right) + "</td>"
+        + '<td valign="middle" align="center">' + "".join(lines) + "</td>"
+        + balance
         + "</tr></table>"
     )
 
@@ -150,13 +168,24 @@ def _patient_block(r: Report) -> str:
     ]
 
     def col(items):
-        return "".join(
-            f'<tr><td class="lbl" valign="top">{escape(k)}</td>'
-            f'<td class="cln" valign="top">:</td>'
-            f'<td class="val" valign="top">{escape(v)}</td></tr>'
-            for k, v in items
-            if v
-        )
+        # Every value is set heavy with an explicit <b>: Qt honours the tag
+        # where a class-only font-weight is sometimes dropped on the printer
+        # path. The name is set a size larger again - it is the one field the
+        # patient checks first.
+        out = []
+        for k, v in items:
+            if not v:
+                continue
+            shown = f"<b>{escape(v)}</b>"
+            label = escape(k)
+            if k == "Patient Name":
+                shown = f'<span class="pname">{shown}</span>'
+                label = f'<span class="pname-lbl"><b>{label}</b></span>'
+            out.append(
+                f'<tr><td class="lbl" valign="top">{label}</td>'
+                f'<td class="cln" valign="top">:</td>'
+                f'<td class="val" valign="top">{shown}</td></tr>')
+        return "".join(out)
 
     return (
         f'<table width="100%" class="patient" cellspacing="0" cellpadding="8"'
@@ -242,15 +271,15 @@ def _rows_table(rows: List[TestRow]) -> str:
             # An out-of-range row is tinted end to end, not just its number, so
             # it can be found by flipping through a printed report.
             bg = CRIMSON_TINT
-            value = f'<span class="abn">{value}&nbsp;&nbsp;<b>{flag}</b></span>'
+            value = f'<span class="abn"><b>{value}</b>&nbsp;&nbsp;<b>{flag}</b></span>'
             name_cls, ref_cls = "tname abnname", "ref abnref"
         else:
             bg = ZEBRA if striped % 2 == 0 else PAPER
-            value = f'<span class="ok">{value}</span>'
+            value = f'<span class="ok"><b>{value}</b></span>'
             name_cls, ref_cls = "tname", "ref"
         out.append(
             "<tr>"
-            f'<td bgcolor="{bg}" class="{name_cls}">{escape(row.name)}</td>'
+            f'<td bgcolor="{bg}" class="{name_cls}"><b>{escape(row.name)}</b></td>'
             f'<td bgcolor="{bg}">{value}</td>'
             f'<td bgcolor="{bg}" class="unit">{escape(row.unit)}</td>'
             f'<td bgcolor="{bg}" class="{ref_cls}">{escape(row.ref)}</td></tr>'
@@ -409,32 +438,55 @@ def _end_marker() -> str:
     )
 
 
-def _signature(lab: LabProfile) -> str:
-    sig = _data_uri(lab.signature_path)
-    if not (sig or lab.pathologist or lab.pathologist_degrees):
+def _signatory(image_path: str, name: str, degrees: str, role: str) -> str:
+    """One signing block: image (or a blank line to sign on), rule, name,
+    qualification, role. Empty when there is nobody to name."""
+    sig = _data_uri(image_path)
+    if not (sig or name or degrees):
         return ""
     # Signing line drawn as a filled cell rather than a border, for the same
     # reason as the end-of-report rules.
     signline = (
-        '<table width="180" cellspacing="0" cellpadding="0" align="center">'
+        '<table width="150" cellspacing="0" cellpadding="0" align="center">'
         f'<tr><td bgcolor="{MUTED}" height="1" style="{_bar(1)}">'
         "&nbsp;</td></tr></table>"
     )
     parts = [
-        f'<img src="{sig}" width="130"><br>' if sig else _spacer(10),
+        f'<img src="{sig}" width="120"><br>' if sig else _spacer(14),
         signline,
         _spacer(3),
     ]
-    if lab.pathologist:
-        parts.append(f'<b class="signname">{escape(lab.pathologist)}</b><br>')
-    if lab.pathologist_degrees:
-        parts.append(f'<span class="sub">{escape(lab.pathologist_degrees)}</span><br>')
-    parts.append('<span class="signrole">Verified &amp; Authorised Signatory</span>')
+    if name:
+        parts.append(f'<b class="signname">{escape(name)}</b><br>')
+    # The qualification line is always emitted, blank if need be, so the two
+    # signatories' rules and names sit level across the page - Qt ignores
+    # valign="bottom" on cells, so the blocks have to be the same height.
+    parts.append(f'<span class="sub">{escape(degrees) or "&nbsp;"}</span><br>')
+    parts.append(f'<span class="signrole">{role}</span>')
+    return "".join(parts)
+
+
+def _signature(lab: LabProfile, r: Report) -> str:
+    """Three signatories across the foot of the page, left to right in the
+    order the work passed through their hands: the person who raised the bill
+    (a space to sign by hand, and their name), the technician who ran the
+    tests, and the pathologist who vouches for the result."""
+    billed = _signatory("", r.billing.billed_by or lab.billed_by, "", "Billed By")
+    technician = _signatory(lab.technician_signature_path, lab.technician, "",
+                            "Lab Technician")
+    pathologist = _signatory(lab.signature_path, lab.pathologist,
+                             lab.pathologist_degrees,
+                             "Verified &amp; Authorised Signatory")
+    if not (billed or technician or pathologist):
+        return ""
+    cells = "".join(
+        f'<td align="center" valign="bottom" width="32%">{block or "&nbsp;"}</td>'
+        + ('<td width="2%">&nbsp;</td>' if i < 2 else "")
+        for i, block in enumerate((billed, technician, pathologist))
+    )
     return (
         '<table width="100%" cellspacing="0" cellpadding="0"><tr>'
-        '<td width="58%">&nbsp;</td>'
-        f'<td align="center" valign="bottom" width="42%">{"".join(parts)}</td>'
-        "</tr></table>"
+        + cells + "</tr></table>"
     )
 
 
@@ -445,6 +497,9 @@ body {{ font-family: 'Segoe UI', Calibri, Arial, sans-serif; font-size: 10pt;
             letter-spacing: 0.5px; }}
 .sub {{ font-size: 8.5pt; color: {MUTED}; }}
 .subkey {{ font-weight: bold; color: {INK_SOFT}; }}
+.hours {{ font-size: 8.5pt; color: {ACCENT}; font-weight: bold; }}
+.pname {{ font-size: 11pt; font-weight: bold; color: {INK}; }}
+.pname-lbl {{ font-weight: bold; color: {INK_SOFT}; }}
 .bandtext {{ color: #ffffff; font-size: 10.5pt; font-weight: bold;
              letter-spacing: 2.5px; }}
 .bandmeta {{ color: #ffffff; font-size: 9.5pt; letter-spacing: 0.5px; }}
@@ -466,7 +521,7 @@ table.results td {{ border-bottom: 1px solid {RULE}; font-size: 9.5pt; }}
 .unit {{ color: {INK_SOFT}; font-size: 9pt; }}
 .ref {{ color: {MUTED}; font-size: 9pt; }}
 .abnref {{ color: {CRIMSON}; font-size: 9pt; }}
-.ok {{ font-weight: bold; color: {INK}; }}
+.ok {{ font-weight: bold; color: {INK}; font-size: 10pt; }}
 .abn {{ color: {CRIMSON}; font-weight: bold; }}
 td.subhead {{ font-weight: bold; font-size: 8pt; color: {BAND};
               letter-spacing: 1.5px; }}
@@ -535,7 +590,7 @@ def build(report: Report, lab: LabProfile) -> str:
     body.append(_spacer(6))
     body.append(_end_marker())
     body.append(_spacer(4))
-    body.append(_signature(lab))
+    body.append(_signature(lab, report))
 
     if lab.footer_note:
         body.append(_spacer(6))

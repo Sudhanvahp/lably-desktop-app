@@ -141,7 +141,7 @@ class HistoryView(QWidget):
 
         row.addStretch(1)
         for icon_name, text, tip, slot, kind in (
-            ("copy", "Duplicate", "Same patient, blank results", self.duplicate_selected, ""),
+            ("copy", "Duplicate", "Same patient, blank results", self.duplicate_selected, "Danger"),
             ("preview", "Preview", "See it before printing", self.preview_selected, ""),
             ("pdf", "Export PDF", "Save as a PDF file", self.export_selected, ""),
             ("printer", "Reprint", "Send to the printer again", self.print_selected, ""),

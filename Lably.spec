@@ -63,5 +63,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=None,
+    icon="assets/lably.ico",
+    # Publisher / description shown in Properties, SmartScreen and Task Manager.
+    version="version_info.py",
 )

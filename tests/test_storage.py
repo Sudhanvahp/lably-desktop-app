@@ -336,3 +336,141 @@ class ProfileTests(SandboxCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class BackupTests(SandboxCase):
+    """Copying saved reports to a synced (Google Drive) folder."""
+
+    def _enable(self):
+        folder = os.path.join(self.sandbox, "My Drive", "Lably")
+        self.storage.save_profile(LabProfile(lab_name="Sunrise", backup_dir=folder))
+        return folder
+
+    def _month(self, folder, report):
+        return self.storage.backup_month_dir(folder, report)
+
+    def test_backup_is_off_by_default(self):
+        report = self.storage.save_report(self.make_report())
+        self.assertIsNone(self.storage.backup_copy(report))
+
+    def test_saved_report_is_copied_under_a_readable_name(self):
+        folder = self._enable()
+        report = self.storage.save_report(self.make_report(name="Jane Doe"))
+        month = self._month(folder, report)
+        self.assertEqual(self.storage.backup_copy(report), month)
+        expected = os.path.join(month, "data", f"{report.report_no}-Jane-Doe.json")
+        self.assertTrue(os.path.isfile(expected))
+        with open(expected, encoding="utf-8") as fh:
+            self.assertEqual(json.load(fh)["patient_name"], "Jane Doe")
+
+    def test_backup_name_strips_unsafe_characters(self):
+        report = self.make_report(name='A/B: "C"?')
+        report.report_no = "BR-000007"
+        self.assertEqual(self.storage.backup_name(report), "BR-000007-A-B-C")
+
+    def test_an_unwritable_backup_folder_does_not_stop_the_save(self):
+        bad = os.path.join(self.sandbox, "not-a-folder.txt")
+        with open(bad, "w") as fh:
+            fh.write("x")
+        self.storage.save_profile(LabProfile(lab_name="S", backup_dir=bad))
+        report = self.storage.save_report(self.make_report())
+        self.assertIsNone(self.storage.backup_copy(report))
+        self.assertIsNotNone(self.storage.load_report(report.id))
+
+    def test_check_backup_dir(self):
+        self.assertIsNone(self.storage.check_backup_dir(""))
+        self.assertIsNone(self.storage.check_backup_dir(
+            os.path.join(self.sandbox, "new", "deep")))
+        self.assertIn("outside", self.storage.check_backup_dir(self.storage.app_dir()))
+        with open(os.path.join(self.sandbox, "file.txt"), "w") as fh:
+            fh.write("x")
+        self.assertIn("Cannot write", self.storage.check_backup_dir(
+            os.path.join(self.sandbox, "file.txt")))
+        self.assertIn("Cannot write", self.storage.check_backup_dir(
+            os.path.join(self.sandbox, "bad" + chr(0) + "name")))
+
+    def test_google_drive_paths_are_recognised(self):
+        self.assertTrue(self.storage.is_google_drive_path(r"G:\My Drive\Lably"))
+        self.assertTrue(self.storage.is_google_drive_path("/home/x/Google Drive/Lably"))
+        self.assertFalse(self.storage.is_google_drive_path(r"D:\Backups"))
+        self.assertFalse(self.storage.is_google_drive_path(""))
+
+    def test_profile_round_trips_the_new_letterhead_fields(self):
+        self.storage.save_profile(LabProfile(
+            lab_name="S", timings="Mon-Sat 7-8", holidays="Sundays",
+            backup_dir=r"G:\My Drive\Lably"))
+        self.storage.clear_cache()
+        loaded = self.storage.load_profile()
+        self.assertEqual(loaded.timings, "Mon-Sat 7-8")
+        self.assertEqual(loaded.holidays, "Sundays")
+        self.assertEqual(loaded.backup_dir, r"G:\My Drive\Lably")
+
+    def test_a_relative_backup_path_is_refused(self):
+        self.assertIn("full path", self.storage.check_backup_dir("Lably"))
+
+    def test_the_app_folder_check_ignores_case(self):
+        self.assertIn("outside", self.storage.check_backup_dir(
+            self.storage.app_dir().upper()))
+
+    def test_renaming_the_patient_replaces_the_old_backup_copy(self):
+        folder = self._enable()
+        report = self.storage.save_report(self.make_report(name="Jane Do"))
+        self.storage.backup_copy(report)
+        report.patient_name = "Jane Doe"
+        self.storage.save_report(report)
+        self.storage.backup_copy(report)
+        names = sorted(os.listdir(os.path.join(self._month(folder, report), "data")))
+        self.assertEqual(names, [f"{report.report_no}-Jane-Doe.json"])
+
+    def test_purging_never_touches_other_reports(self):
+        folder = self._enable()
+        first = self.storage.save_report(self.make_report(name="A"))
+        second = self.storage.save_report(self.make_report(name="B"))
+        self.storage.backup_copy(first)
+        self.storage.backup_copy(second)
+        self.storage.backup_copy(first)
+        self.assertEqual(len(os.listdir(os.path.join(self._month(folder, first), "data"))), 2)
+
+    def test_purging_spares_another_pcs_report_with_the_same_number(self):
+        """Two machines sharing one Drive folder can both hand out BR-000001."""
+        folder = self._enable()
+        report = self.storage.save_report(self.make_report(name="Mine"))
+        dest = os.path.join(self._month(folder, report), "data")
+        os.makedirs(dest)
+        foreign = os.path.join(dest, f"{report.report_no}-Theirs.json")
+        with open(foreign, "w", encoding="utf-8") as fh:
+            json.dump({"id": "some-other-id", "patient_name": "Theirs"}, fh)
+        self.storage.backup_copy(report)
+        self.assertTrue(os.path.isfile(foreign))
+
+    def test_the_pdf_twin_of_a_stale_copy_is_retired_too(self):
+        folder = self._enable()
+        report = self.storage.save_report(self.make_report(name="Jane Do"))
+        self.storage.backup_copy(report)
+        pdf_dir = self._month(folder, report)
+        old_pdf = os.path.join(pdf_dir, f"{report.report_no}-Jane-Do.pdf")
+        with open(old_pdf, "wb") as fh:
+            fh.write(b"%PDF-1.4")
+        report.patient_name = "Jane Doe"
+        self.storage.save_report(report)
+        self.storage.backup_copy(report)
+        self.assertFalse(os.path.exists(old_pdf))
+
+    def test_copies_are_filed_by_year_and_month(self):
+        folder = self._enable()
+        report = self.make_report(name="Jane")
+        report.created_at = "2026-03-15T10:00:00"
+        report = self.storage.save_report(report)
+        month = self.storage.backup_copy(report)
+        self.assertEqual(month, os.path.join(folder, "2026", "03-March"))
+        self.assertTrue(os.path.isfile(os.path.join(
+            month, "data", f"{report.report_no}-Jane.json")))
+
+    def test_an_unreadable_created_at_files_under_today(self):
+        from datetime import datetime
+        folder = self._enable()
+        report = self.make_report(name="Jane")
+        report.created_at = "garbage"
+        self.assertEqual(self.storage.backup_month_dir(folder, report),
+                         os.path.join(folder, f"{datetime.now():%Y}",
+                                      f"{datetime.now():%m-%B}"))

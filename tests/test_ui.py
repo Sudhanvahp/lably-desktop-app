@@ -35,6 +35,19 @@ class UICase(SandboxCase):
         from app.ui.main_window import MainWindow
 
         self.storage.save_profile(LabProfile(lab_name="Test Lab"))
+        # The first-save Google Drive question is a modal dialog; answer it
+        # silently here, and let a test that wants it set drive_answers itself.
+        from app.ui.drive_prompt import Answer
+        from app.ui.report_form import ReportForm
+        self.drive_answers = []
+        self.drive_prompts = 0
+
+        def fake_prompt(parent=None):
+            self.drive_prompts += 1
+            return self.drive_answers.pop(0) if self.drive_answers else Answer("", False)
+        original = ReportForm.drive_prompt
+        ReportForm.drive_prompt = staticmethod(fake_prompt)
+        self.addCleanup(setattr, ReportForm, "drive_prompt", staticmethod(original))
         self.window = MainWindow()
         self.form = self.window.form
         self.history = self.window.history
@@ -2171,3 +2184,55 @@ class BillLayoutTests(UICase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DrivePromptTests(UICase):
+    """Save offers Google Drive once, then copies there without asking."""
+
+    def _fill_and_save(self):
+        self.fill()
+        return self.form.save()
+
+    def test_the_first_save_asks(self):
+        self._fill_and_save()
+        self.assertEqual(self.drive_prompts, 1)
+
+    def test_not_now_asks_again_next_time(self):
+        self._fill_and_save()
+        self.form.new_report()
+        self._fill_and_save()
+        self.assertEqual(self.drive_prompts, 2)
+
+    def test_dont_ask_again_is_remembered(self):
+        from app.ui.drive_prompt import Answer
+        self.drive_answers = [Answer("", True)]
+        self._fill_and_save()
+        self.form.new_report()
+        self._fill_and_save()
+        self.assertEqual(self.drive_prompts, 1)
+        self.assertEqual(self.storage.load_profile().backup_declined, "1")
+
+    def test_choosing_a_folder_backs_up_that_save_and_every_later_one(self):
+        import os
+        from app.ui.drive_prompt import Answer
+        folder = os.path.join(self.sandbox, "My Drive", "Lably")
+        self.drive_answers = [Answer(folder, False)]
+        self._fill_and_save()
+        self.assertEqual(self.storage.load_profile().backup_dir, folder)
+        report = self.storage.load_report(self.form.current_id)
+        month = self.storage.backup_month_dir(folder, report)
+        self.assertEqual(len(os.listdir(os.path.join(month, "data"))), 1)
+        self.assertEqual([f for f in os.listdir(month) if f.endswith(".pdf")],
+                         [self.storage.backup_name(report) + ".pdf"])
+        self.form.new_report()
+        self._fill_and_save()
+        self.assertEqual(self.drive_prompts, 1)
+        self.assertEqual(len(os.listdir(os.path.join(month, "data"))), 2)
+        self.assertIn("Copied to the backup folder", self.messages[-1][0])
+
+    def test_an_unusable_folder_is_refused_and_asked_again(self):
+        from app.ui.drive_prompt import Answer
+        self.drive_answers = [Answer("Lably", False)]
+        self._fill_and_save()
+        self.assertEqual(self.storage.load_profile().backup_dir, "")
+        self.assertEqual(self.messages[-2][1], "warning")

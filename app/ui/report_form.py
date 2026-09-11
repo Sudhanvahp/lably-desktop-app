@@ -1,4 +1,5 @@
 """New / edit report screen: patient details, panel selection, editable results grid."""
+import os
 from datetime import datetime
 
 from PySide6.QtCore import QDate, QDateTime, Qt, Signal
@@ -12,6 +13,7 @@ from PySide6.QtWidgets import (
 )
 
 from .. import billing, printing, storage
+from .drive_prompt import apply_answer, ask_for_drive
 from . import icons
 from .theme import ACCENT, ACCENT_DARK, DANGER, MUTED, S2, S3, SURFACE_ALT
 from . import theme as T
@@ -1310,10 +1312,52 @@ class ReportForm(QWidget):
         # so show what was actually stored rather than what was on screen.
         self._load_billing(report.billing)
         self.saved.emit()
-        self.notify.emit(
-            f"Report {report.report_no} saved for {report.patient_name} "
-            f"({report.patient_id}).", "success")
+        if storage.should_ask_for_backup():
+            self._ask_for_drive()
+        # One toast, not two: a backup problem must not be painted over by
+        # the success message that would otherwise follow it.
+        saved = (f"Report {report.report_no} saved for {report.patient_name} "
+                 f"({report.patient_id}).")
+        problem = self._backup(report)
+        if problem:
+            self.notify.emit(saved + " " + problem, "warning")
+        elif storage.backup_dir():
+            self.notify.emit(saved + " Copied to the backup folder.", "success")
+        else:
+            self.notify.emit(saved, "success")
         return True
+
+    # Swappable so a headless run (tests, scripts) never blocks on the dialog.
+    drive_prompt = staticmethod(ask_for_drive)
+
+    def _ask_for_drive(self):
+        problem = apply_answer(self.drive_prompt(self))
+        if problem:
+            self.notify.emit(problem, "warning")
+
+    def _backup(self, report) -> str:
+        """Copy the saved report to the backup folder as data plus a PDF.
+
+        The PDF is what the lab actually wants in Drive - something they can
+        open on a phone and send to a patient - and it is rendered here rather
+        than in storage because only the UI layer can reach the printer stack.
+        Returns a one-line problem to show, or "" when all went well (or
+        backup is off). Never raises: the report is already safe on disk."""
+        if not storage.backup_dir():
+            return ""
+        month = storage.backup_copy(report)
+        if not month:
+            return ("The backup folder could not be written - check it in "
+                    "Laboratory Profile.")
+        pdf = os.path.join(month, storage.backup_name(report) + ".pdf")
+        try:
+            printing.export_pdf(build(report, storage.load_profile()), pdf)
+        except OSError:
+            pass
+        # QPrinter reports nothing when it cannot write, so look for the file.
+        if not os.path.isfile(pdf):
+            return "Backed up the data, but the PDF copy could not be written."
+        return ""
 
     def _html(self) -> str:
         return build(self.collect(), storage.load_profile())

@@ -532,12 +532,13 @@ QLabel#BillBalanceClear {{
 
 /* ----------------------------------------------------------- app footer */
 QLabel#AppFooterName {{
-    color: {MUTED};
-    font-size: 9.5pt;
-    font-weight: 700;
-    letter-spacing: 2.5px;
+    color: {DANGER};
+    font-size: 10.5pt;
+    font-weight: 900;
+    letter-spacing: 3px;
 }}
-QLabel#AppFooterMeta {{ color: {FAINT}; font-size: 8pt; letter-spacing: 1.1px; }}
+QLabel#AppFooterMeta {{ color: {INK_SOFT}; font-size: 8.5pt; font-weight: 700;
+                        letter-spacing: 1.1px; }}
 
 QLabel#EmptyTitle {{ font-size: 13pt; font-weight: 600; color: {INK_SOFT}; }}
 QLabel#EmptyBody {{ font-size: 10pt; color: {MUTED}; }}

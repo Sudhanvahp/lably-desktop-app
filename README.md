@@ -21,9 +21,15 @@ Or just double-click **run.bat**.
 ## First use
 
 Open the **Laboratory Profile** tab (the app starts there until it's filled in) and enter the
-laboratory name, address, phone, registration number, pathologist name and degrees, and
-pick a logo and signature image. A live preview shows the letterhead exactly as it will
-print. Chosen images are copied into the app's own `assets` folder, so the report keeps
+laboratory name, address, phone, registration number, **lab timings** and the
+**holidays** (free text, optional - e.g. "Sundays & public holidays"), pathologist name
+and degrees, the **lab technician's name**, and pick a logo and the two signature images.
+Three people sign the foot of every report, left to right: the person who raised the bill
+(a blank line to sign by hand, under the *Billed By* name), the lab technician, and the
+pathologist. The letterhead prints centred on the page, with the timings and holidays
+on their own line under the contact details - change them in the profile and every
+report printed from then on carries the new ones. A live preview shows the letterhead
+exactly as it will print. Chosen images are copied into the app's own `assets` folder, so the report keeps
 working even if you later move or delete the originals.
 
 ## Making a report
@@ -436,6 +442,33 @@ one. If the history list ever looks wrong, **File → Rebuild History Index** re
 
 To back up or move to another machine, copy the whole `BloodReportApp` folder.
 
+### Backup to Google Drive
+
+In **Laboratory Profile → Backup Folder**, press **Use Google Drive** (or **Browse...**
+and pick any folder). **Open** shows the folder in Explorer, as does
+**File → Open Backup Folder (Google Drive)**. If Drive is not installed, **Use Google
+Drive** offers to open its download page. From then on every report you save is also
+copied there:
+
+```
+<backup folder>\
+  2026\
+    09-September\
+      BR-000012-Ravi-Kumar.pdf          the printed report, openable on any phone
+      data\BR-000012-Ravi-Kumar.json    the data file (restorable)
+```
+
+One folder per year and one per month inside it, by the month the report was made, so
+finding "that report from last March" is two clicks in Drive.
+
+This relies on **Google Drive for desktop** (google.com/drive/download) being installed and
+signed in: it mirrors that folder to the Google account, so the app never needs to talk to
+Google itself and there is no login inside the app to expire. OneDrive or any other sync
+folder works the same way. Saving never fails because of the backup - if the folder is
+missing or unwritable, the report is still saved locally and a warning is shown. Saving a
+report again after correcting the patient's name replaces the earlier copy rather than
+leaving two spellings in Drive. Deleting a report in the app does not delete its backup.
+
 ## Printing
 
 Printing goes through the standard Windows print dialog, so any installed printer works.
@@ -508,7 +541,10 @@ pip install pyinstaller
 python -m PyInstaller --noconfirm --distpath "%USERPROFILE%\Desktop" Lably.spec
 ```
 
-The result is a single **`Lably.exe` (~46 MB) on your Desktop**. That one file is
+The result is a single **`Lably.exe` (~46 MB) on your Desktop**. The exe is stamped
+with `version_info.py`, so Explorer's **Properties → Details**, Task Manager and the
+SmartScreen prompt all name **ACHUTHTECH** as the publisher, and a
+**"Developed by ACHUTHTECH"** card shows for a moment on every launch. That one file is
 the whole app - send it on WhatsApp, email or a pen drive with no zipping. The
 recipient double-clicks it; Python and PySide6 are not needed on their machine.
 

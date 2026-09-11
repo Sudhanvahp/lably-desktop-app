@@ -8,12 +8,13 @@ NAV_TAGLINE = "Pathology Reports"
 # rename: renaming it would orphan every report already on disk.
 DATA_FOLDER = "BloodReportApp"
 
-APP_VERSION = "v1.1"   # billing, the standalone bill, strict Indian phones
+APP_VERSION = "v1.2"   # centred letterhead, timings, Drive backup, launch splash
 
 # Who made it, shown in the footer under every page. Separate from APP_NAME:
 # the product can be renamed or white-labelled without touching the vendor.
 VENDOR = "ACHUTHTECH"
 ORIGIN = "Made in India"
+DEVELOPED_BY = f"Developed by {VENDOR}"
 
 # Dropped from the footer once the app is out of beta - set it to "" then.
 RELEASE_STAGE = "Beta"

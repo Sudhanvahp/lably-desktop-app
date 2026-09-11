@@ -116,6 +116,11 @@ class MainWindow(QMainWindow):
             file_menu.addAction(action)
         file_menu.addSeparator()
 
+        backup = QAction("Open &Backup Folder (Google Drive)", self)
+        backup.setToolTip("Show the folder your saved reports are copied into.")
+        backup.triggered.connect(self._open_backup_folder)
+        file_menu.addAction(backup)
+
         rebuild = QAction("Rebuild History Index", self)
         rebuild.setToolTip("Re-scan the reports folder if the history list looks wrong.")
         rebuild.triggered.connect(self._rebuild_index)
@@ -177,6 +182,11 @@ class MainWindow(QMainWindow):
             self.toast.show_message(
                 "The report open in the form was deleted - the form has been reset.",
                 "warning", 6000)
+
+    def _open_backup_folder(self):
+        if not storage.open_backup_folder():
+            self.toast.show_message("No backup folder is set. Choose one in Laboratory "
+                            "Profile > Backup Folder.", "warning")
 
     def _rebuild_index(self):
         entries = storage.rebuild_index()

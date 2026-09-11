@@ -12,8 +12,14 @@ class LabProfile:
     mobile: str = ""
     email: str = ""
     reg_no: str = ""
+    timings: str = ""           # e.g. "Mon-Sat 7:00 AM - 8:00 PM"; printed in the letterhead
+    holidays: str = ""          # when the lab is shut, e.g. "Sundays & public holidays"
+    backup_dir: str = ""        # a synced folder (Google Drive, OneDrive) copied to on save
+    backup_declined: str = ""   # "1" once the operator has said not to ask about Drive again
     pathologist: str = ""
     pathologist_degrees: str = ""
+    technician: str = ""                # lab technician who ran the tests
+    technician_signature_path: str = ""
     footer_note: str = ""
     bill_notes: str = ""        # one note per line; the bill numbers them
     billed_by: str = ""         # default staff name on a new bill

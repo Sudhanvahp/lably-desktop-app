@@ -248,3 +248,92 @@ class RobustnessTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LetterheadTests(unittest.TestCase):
+    def test_letterhead_is_centred(self):
+        html = letterhead(sample_profile())
+        self.assertIn('<td valign="middle" align="center">', html)
+        self.assertIn('class="labname" align="center"', html)
+
+    def test_logo_is_balanced_by_an_empty_column(self):
+        """So the text block is centred on the page, not on the space left over."""
+        import tempfile, os
+        with tempfile.NamedTemporaryFile("wb", suffix=".png", delete=False) as fh:
+            fh.write(b"\x89PNG\r\n\x1a\n")
+        try:
+            html = letterhead(sample_profile(logo_path=fh.name))
+        finally:
+            os.remove(fh.name)
+        self.assertEqual(html.count('width="96"'), 2)
+
+    def test_timings_and_holidays_print_in_the_letterhead(self):
+        html = letterhead(sample_profile(timings="Mon-Sat 7 AM - 8 PM",
+                                         holidays="Sundays and public holidays"))
+        self.assertIn("Timings", html)
+        self.assertIn("Mon-Sat 7 AM - 8 PM", html)
+        self.assertIn("Holidays", html)
+        self.assertIn("Sundays and public holidays", html)
+
+    def test_blank_timings_print_no_label(self):
+        html = letterhead(sample_profile())
+        self.assertNotIn("Timings", html)
+        self.assertNotIn("Holidays", html)
+
+    def test_timings_are_escaped(self):
+        html = letterhead(sample_profile(timings="<b>7-8</b>"))
+        self.assertNotIn("<b>7-8</b>", html)
+        self.assertIn("&lt;b&gt;7-8&lt;/b&gt;", html)
+
+
+class EmphasisTests(unittest.TestCase):
+    def test_patient_name_is_bold_and_larger(self):
+        html = build(sample_report(patient_name="Jane Doe"), sample_profile())
+        self.assertIn('<span class="pname"><b>Jane Doe</b></span>', html)
+
+    def test_results_are_bold(self):
+        html = build(sample_report(), sample_profile())
+        self.assertIn('<span class="ok"><b>2.5</b></span>', html)
+        self.assertIn('<span class="abn"><b>9.2</b>&nbsp;&nbsp;<b>L</b></span>', html)
+
+
+class SignatoryTests(unittest.TestCase):
+    def test_technician_signs_on_the_left_and_pathologist_on_the_right(self):
+        html = build(sample_report(), sample_profile(technician="S. Kumar"))
+        tech = html.index("S. Kumar")
+        path = html.index("Dr. A. Rao")
+        self.assertLess(tech, path)
+        self.assertIn("Lab Technician", html)
+        self.assertIn("Verified &amp; Authorised Signatory", html)
+
+    def test_no_technician_leaves_the_middle_slot_empty(self):
+        html = build(sample_report(), sample_profile())
+        self.assertNotIn("Lab Technician", html)
+        self.assertIn("Dr. A. Rao", html)
+
+    def test_the_billed_by_person_signs_on_the_far_left(self):
+        report = sample_report(billing=Billing(billed_by="Miss. Nethra"))
+        html = build(report, sample_profile(technician="S. Kumar"))
+        self.assertLess(html.index("Miss. Nethra"), html.index("S. Kumar"))
+        self.assertLess(html.index("S. Kumar"), html.index("Dr. A. Rao"))
+        self.assertIn("Billed By", html)
+
+    def test_the_billed_by_slot_falls_back_to_the_profile_default(self):
+        html = build(sample_report(), sample_profile(billed_by="Miss. Nethra"))
+        self.assertIn("Miss. Nethra", html)
+        self.assertIn("Billed By", html)
+
+    def test_nobody_billing_leaves_that_slot_empty(self):
+        html = build(sample_report(), sample_profile())
+        self.assertNotIn("Billed By", html)
+
+    def test_technician_name_is_escaped(self):
+        html = build(sample_report(), sample_profile(technician="<i>x</i>"))
+        self.assertNotIn("<i>x</i>", html)
+
+
+class LabelEmphasisTests(unittest.TestCase):
+    def test_patient_name_label_and_test_names_are_bold(self):
+        html = build(sample_report(), sample_profile())
+        self.assertIn('<span class="pname-lbl"><b>Patient Name</b></span>', html)
+        self.assertIn("<b>Haemoglobin (Hb)</b>", html)

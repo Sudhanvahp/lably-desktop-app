@@ -1,7 +1,8 @@
 """Lab profile editor. Everything here is stamped onto every printed report."""
 import os
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, QUrl, Signal
+from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QFileDialog, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit,
     QMessageBox, QPushButton, QScrollArea, QTextBrowser, QTextEdit,
@@ -18,6 +19,10 @@ from .theme import MUTED, S2, S3
 from .widgets import Card, PageHeader, icon_button
 
 IMAGE_FILTER = "Images (*.png *.jpg *.jpeg *.bmp *.gif)"
+
+# Every field that holds a phone number: validated, normalised and length-capped
+# the same way, so the letterhead never shows two numbers in two styles.
+PHONE_FIELDS = ("phone", "mobile")
 
 
 class ImagePicker(QWidget):
@@ -83,8 +88,11 @@ class SettingsView(QWidget):
         ("mobile", "Mobile"),
         ("email", "Email"),
         ("reg_no", "Registration No."),
+        ("timings", "Lab Timings"),
+        ("holidays", "Holidays"),
         ("pathologist", "Pathologist / Signatory"),
         ("pathologist_degrees", "Degrees / Qualification"),
+        ("technician", "Lab Technician"),
         ("footer_note", "Footer Note"),
         ("billed_by", "Billed By"),
     ]
@@ -103,7 +111,10 @@ class SettingsView(QWidget):
             "billed_by": V.DOCTOR_PATTERN,
             "email": V.EMAIL_PATTERN,
             "reg_no": V.REG_NO_PATTERN,
+            "timings": V.TEXT_LINE_PATTERN,
+            "holidays": V.TEXT_LINE_PATTERN,
             "pathologist": V.DOCTOR_PATTERN,
+            "technician": V.DOCTOR_PATTERN,
             "lab_name": V.TEXT_LINE_PATTERN,
             "address1": V.TEXT_LINE_PATTERN,
             "address2": V.TEXT_LINE_PATTERN,
@@ -115,8 +126,11 @@ class SettingsView(QWidget):
             "mobile": "+91 9845012345",
             "billed_by": "Name printed on the bill as Printed By / Billed By",
             "email": "lab@example.com",
+            "timings": "Mon-Sat 7:00 AM - 8:00 PM, Sun 7:00 AM - 1:00 PM",
+            "holidays": "Sundays and public holidays (optional)",
             "pathologist": "Dr. A. Rao",
             "pathologist_degrees": "MD (Pathology)",
+            "technician": "Name printed and signed on the left of every report",
         }
         for key, label in self.FIELDS:
             edit = QLineEdit()
@@ -124,7 +138,7 @@ class SettingsView(QWidget):
                 edit.setValidator(V.validator(patterns[key], self))
             if key in placeholders:
                 edit.setPlaceholderText(placeholders[key])
-            edit.setMaxLength(V.MAX_PHONE if key in ("phone", "mobile") else 120)
+            edit.setMaxLength(V.MAX_PHONE if key in PHONE_FIELDS else 120)
             edit.textChanged.connect(self._refresh_preview)
             self.edits[key] = edit
             form.addRow(label + ":", edit)
@@ -159,11 +173,15 @@ class SettingsView(QWidget):
         form.addRow("Bill Notes:", notes_column)
 
         self.logo = ImagePicker("logo", "Select laboratory logo")
-        self.signature = ImagePicker("signature", "Select signature image")
-        self.logo.changed.connect(self._refresh_preview)
-        self.signature.changed.connect(self._refresh_preview)
+        self.signature = ImagePicker("signature", "Select pathologist's signature image")
+        self.technician_signature = ImagePicker(
+            "technician_signature", "Select lab technician's signature image")
+        for picker in (self.logo, self.signature, self.technician_signature):
+            picker.changed.connect(self._refresh_preview)
         form.addRow("Logo:", self.logo)
-        form.addRow("Signature:", self.signature)
+        form.addRow("Pathologist Signature:", self.signature)
+        form.addRow("Technician Signature:", self.technician_signature)
+        form.addRow("Backup Folder:", self._build_backup_picker())
 
         box = Card("Laboratory Details",
                    "printed on every report and every bill")
@@ -213,6 +231,106 @@ class SettingsView(QWidget):
         outer.addLayout(buttons)
 
         self.load()
+
+    # --------------------------------------------------------------- backup
+    def _build_backup_picker(self) -> QWidget:
+        """A synced folder that every saved report is copied into.
+
+        There is no Google API here on purpose: a one-file exe with no
+        installer cannot carry OAuth credentials, and a lab counter has no one
+        to renew them. Google Drive for desktop already mirrors a local folder
+        to the cloud, so the app writes there and lets Drive do the uploading.
+        The same works for OneDrive or any other sync client."""
+        self.backup_edit = QLineEdit()
+        self.backup_edit.setPlaceholderText(
+            r"e.g. G:\My Drive\Lably  -  leave blank for no backup")
+        self.backup_edit.textChanged.connect(self._refresh_backup_hint)
+
+        detect = icon_button("copy", "Use Google Drive",
+                             "Find the Google Drive folder on this PC")
+        detect.clicked.connect(self._detect_drive)
+        choose = icon_button("open", "Browse...", "Pick any folder")
+        choose.clicked.connect(self._choose_backup)
+        self.open_backup = icon_button(
+            "open", "Open", "Open the backup folder in Explorer to see what is there")
+        self.open_backup.clicked.connect(self._open_backup)
+        clear = icon_button("trash", "Off", "Stop backing up", "Danger")
+        clear.clicked.connect(lambda: self.backup_edit.setText(""))
+
+        self.backup_hint = QLabel("")
+        self.backup_hint.setObjectName("Hint")
+        self.backup_hint.setWordWrap(True)
+
+        row = QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(S2)
+        row.addWidget(self.backup_edit, 1)
+        row.addWidget(detect)
+        row.addWidget(choose)
+        row.addWidget(self.open_backup)
+        row.addWidget(clear)
+
+        holder = QWidget()
+        column = QVBoxLayout(holder)
+        column.setContentsMargins(0, 0, 0, 0)
+        column.setSpacing(4)
+        column.addLayout(row)
+        column.addWidget(self.backup_hint)
+        self._refresh_backup_hint()
+        return holder
+
+    def _detect_drive(self):
+        found = storage.find_google_drive()
+        if found:
+            self.backup_edit.setText(os.path.join(found, "Lably"))
+            return
+        answer = QMessageBox.question(
+            self, "Google Drive not found",
+            "Google Drive for desktop does not seem to be installed, or it "
+            "is not signed in.\n\nOpen the Google Drive download page now? "
+            "After installing and signing in, press Use Google Drive again - "
+            "or use Browse... to pick any folder that is synced to the cloud.",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
+        if answer == QMessageBox.Yes:
+            QDesktopServices.openUrl(QUrl(storage.DRIVE_DOWNLOAD_URL))
+
+    def _open_backup(self):
+        """Open whatever is typed in the box, saved or not, so the operator
+        can check the folder before committing to it."""
+        path = self.backup_edit.text().strip()
+        if not path:
+            self.notify.emit("No backup folder is set. Press Use Google Drive "
+                             "or Browse... first.", "warning")
+            return
+        problem = storage.check_backup_dir(path)
+        if problem:
+            self.notify.emit(problem, "warning")
+            return
+        QDesktopServices.openUrl(QUrl.fromLocalFile(path))
+
+    def _choose_backup(self):
+        start = self.backup_edit.text().strip() or storage.find_google_drive() or ""
+        path = QFileDialog.getExistingDirectory(
+            self, "Choose the folder reports are copied into", start)
+        if path:
+            self.backup_edit.setText(os.path.normpath(path))
+
+    def _refresh_backup_hint(self):
+        path = self.backup_edit.text().strip()
+        self.open_backup.setEnabled(bool(path))
+        if not path:
+            self.backup_hint.setText(
+                "Off. Reports stay only on this PC. Point this at a Google "
+                "Drive (or OneDrive) folder and every saved report is also "
+                "copied there as a PDF and a data file.")
+        elif storage.is_google_drive_path(path):
+            self.backup_hint.setText(
+                "Google Drive folder. Each report you save is copied here and "
+                "Drive uploads it to your Google account automatically.")
+        else:
+            self.backup_hint.setText(
+                "Each report you save is copied into this folder. If the "
+                "folder is synced by a cloud app, the copy goes online.")
 
     # ------------------------------------------------------------- security
     def _build_security_box(self) -> Card:
@@ -292,9 +410,6 @@ class SettingsView(QWidget):
 
     @staticmethod
     def _open_data_folder():
-        from PySide6.QtCore import QUrl
-        from PySide6.QtGui import QDesktopServices
-
         storage.ensure_dirs()
         QDesktopServices.openUrl(QUrl.fromLocalFile(storage.app_dir()))
 
@@ -312,6 +427,8 @@ class SettingsView(QWidget):
             else profile.bill_notes)
         self.logo.set_path(profile.logo_path)
         self.signature.set_path(profile.signature_path)
+        self.technician_signature.set_path(profile.technician_signature_path)
+        self.backup_edit.setText(profile.backup_dir)
         self._refresh_preview()
 
     def current_profile(self) -> LabProfile:
@@ -320,11 +437,13 @@ class SettingsView(QWidget):
             setattr(profile, key, self.edits[key].text().strip())
         # Stored in one form, whatever shape it was typed in, so the letterhead
         # and the bill never show the same number two different ways.
-        profile.phone = V.normalise_phone(profile.phone)
-        profile.mobile = V.normalise_phone(profile.mobile)
+        for key in PHONE_FIELDS:
+            setattr(profile, key, V.normalise_phone(getattr(profile, key)))
         profile.bill_notes = self.bill_notes.toPlainText().strip()
         profile.logo_path = self.logo.path
         profile.signature_path = self.signature.path
+        profile.technician_signature_path = self.technician_signature.path
+        profile.backup_dir = self.backup_edit.text().strip()
         return profile
 
     def _refresh_preview(self):
@@ -340,10 +459,14 @@ class SettingsView(QWidget):
             V.check_text_line(profile.address2, "Address line 2"),
             V.check_phone(profile.phone, "laboratory phone number"),
             V.check_phone(profile.mobile, "mobile number"),
+            V.check_text_line(profile.timings, "Lab timings"),
+            V.check_text_line(profile.holidays, "Holidays"),
             V.check_email(profile.email),
+            storage.check_backup_dir(profile.backup_dir),
             V.check_optional_name(profile.billed_by, "billed-by name"),
             V.check_bill_notes(profile.bill_notes),
             V.check_optional_name(profile.pathologist, "pathologist's name"),
+            V.check_optional_name(profile.technician, "lab technician's name"),
             V.check_text_line(profile.pathologist_degrees, "Degrees"),
             V.check_text_line(profile.footer_note, "Footer note"),
         )
@@ -356,6 +479,6 @@ class SettingsView(QWidget):
                     break
             return
         storage.save_profile(profile)
-        for key in ("phone", "mobile"):
+        for key in PHONE_FIELDS:
             self.edits[key].setText(getattr(profile, key))
         self.profile_saved.emit()
