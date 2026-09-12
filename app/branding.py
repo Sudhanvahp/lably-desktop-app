@@ -4,6 +4,9 @@ APP_NAME = "Lably"
 APP_TAGLINE = "Blood Report Manager"
 NAV_TAGLINE = "Pathology Reports"
 
+# Printed before every patient number: HFCD-000001, HFCD-000002, ...
+PATIENT_ID_PREFIX = "HFCD-"
+
 # Folder under %APPDATA% where reports live. Deliberately unchanged by the
 # rename: renaming it would orphan every report already on disk.
 DATA_FOLDER = "BloodReportApp"

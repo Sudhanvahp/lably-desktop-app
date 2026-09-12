@@ -38,6 +38,8 @@ class HistoryView(QWidget):
 
         self.header = PageHeader("Report History", "Every report you have saved")
         layout.addWidget(self.header)
+        # Search first: it is what the page is for. The tiles are a glance.
+        layout.addLayout(self._build_search())
         layout.addLayout(self._build_stats())
         layout.addWidget(self._build_list_card(), 1)
 
@@ -49,6 +51,24 @@ class HistoryView(QWidget):
             else "Every report you have saved")
 
     # ---------------------------------------------------------------- layout
+    def _build_search(self) -> QHBoxLayout:
+        self.search = QLineEdit()
+        self.search.setPlaceholderText(
+            "Search by patient name, patient ID, report no. or referring doctor")
+        self.search.setClearButtonEnabled(True)
+        self.search.addAction(icons.icon("search", MUTED, 16), QLineEdit.LeadingPosition)
+        self.search.textChanged.connect(self._refill)
+        self.search.setMinimumHeight(40)
+
+        refresh = icon_button("refresh", "Refresh", "Re-read the reports folder")
+        refresh.clicked.connect(self.reload)
+
+        top = QHBoxLayout()
+        top.setSpacing(S2)
+        top.addWidget(self.search, 1)
+        top.addWidget(refresh)
+        return top
+
     def _build_stats(self) -> QHBoxLayout:
         row = QHBoxLayout()
         row.setSpacing(S3)
@@ -67,23 +87,6 @@ class HistoryView(QWidget):
         self.count = QLabel("")
         self.count.setObjectName("CardHint")
         card.add_header_widget(self.count)
-
-        self.search = QLineEdit()
-        self.search.setPlaceholderText(
-            "Search by patient name, patient ID, report no. or referring doctor")
-        self.search.setClearButtonEnabled(True)
-        self.search.addAction(icons.icon("search", MUTED, 16), QLineEdit.LeadingPosition)
-        self.search.textChanged.connect(self._refill)
-        self.search.setMinimumHeight(38)
-
-        refresh = icon_button("refresh", "Refresh", "Re-read the reports folder")
-        refresh.clicked.connect(self.reload)
-
-        top = QHBoxLayout()
-        top.setSpacing(S2)
-        top.addWidget(self.search, 1)
-        top.addWidget(refresh)
-        card.add(top)
 
         self.table = self._build_table()
         self.empty = EmptyState(

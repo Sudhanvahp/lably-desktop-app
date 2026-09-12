@@ -46,7 +46,17 @@ class HeaderTests(unittest.TestCase):
             self.assertIn(expected, self.html)
 
     def test_both_contact_numbers_are_on_one_line(self):
-        self.assertIn("Ph: 08212529999 Mob: 9964725222", self.html)
+        self.assertIn("Ph: 08212529999 &middot; Mob: 9964725222", self.html)
+
+    def test_the_letterhead_is_name_and_sub_heading_only(self):
+        """Contact details print in the footer, as on the report."""
+        html = build(sample_report(), sample_profile(lab_subtitle="Family Clinic"))
+        head = html[:html.index("Cash Bill")]
+        self.assertIn("Family Clinic", head)
+        for text in ("08212529999", "9964725222", "Nrupatunga"):
+            self.assertNotIn(text, head)
+            self.assertIn(text, html)
+        self.assertLess(html.index("Note:"), html.index("Nrupatunga"))
 
     def test_the_bill_type_is_the_documents_heading(self):
         self.assertIn('class="heading" align="center">Cash Bill<', self.html)
@@ -57,8 +67,8 @@ class HeaderTests(unittest.TestCase):
         self.assertIn('class="heading" align="center">Credit Bill<', html)
         self.assertNotIn("Cash Bill", html)
 
-    def test_the_bill_type_also_has_its_own_row(self):
-        self.assertIn("Bill Type", self.html)
+    def test_the_bill_type_no_longer_has_its_own_row(self):
+        self.assertNotIn("Bill Type", self.html)
 
     def test_the_patient_identity_block(self):
         for expected in ("Patient Name", "Mr. Prasanna C N",
@@ -71,7 +81,7 @@ class HeaderTests(unittest.TestCase):
 
     def test_the_bill_identity_block(self):
         for expected in ("Bill No", "416385", "Bill Date",
-                         "Doctor", "Dr. Ravikumar Kulkarni"):
+                         "Ref. By", "Dr. Ravikumar Kulkarni"):
             self.assertIn(expected, self.html)
 
     def test_the_date_carries_the_time_and_spells_out_the_month(self):
@@ -84,7 +94,7 @@ class HeaderTests(unittest.TestCase):
         every row below it out of step with its neighbour."""
         html = build(sample_report(phone="", referred_by=""), sample_profile())
         self.assertIn("Phone No", html)
-        self.assertIn("Doctor", html)
+        self.assertIn("Ref. By", html)
 
     def test_female_and_infant_patients_read_correctly(self):
         html = build(sample_report(sex="F", age="8", age_unit="M"), sample_profile())
@@ -185,17 +195,13 @@ class ClosingFigureTests(unittest.TestCase):
         words = html.index("Amount in Words")
         self.assertIn("One Thousand Forty Rupees Only", html[words:words + 200])
 
-    def test_the_signatories_carry_the_billing_clerk(self):
+    def test_the_bill_names_nobody_as_printed_or_billed_by(self):
+        """The field was removed; a name stored on an older bill stays in the
+        data file but never prints."""
         html = build(sample_report(), sample_profile())
-        self.assertIn("Printed By", html)
-        self.assertIn("Billed By", html)
-        self.assertEqual(html.count("Miss. NETHRA H M"), 2)
-
-    def test_no_clerk_means_no_signature_block(self):
-        html = build(sample_report(billing=sample_bill(billed_by="")),
-                     sample_profile())
         self.assertNotIn("Printed By", html)
         self.assertNotIn("Billed By", html)
+        self.assertNotIn("Miss. NETHRA H M", html)
 
 
 class NoteTests(unittest.TestCase):
@@ -279,11 +285,6 @@ class RobustnessTests(unittest.TestCase):
         html = build(sample_report(billing=sample_bill(bill_type="")),
                      sample_profile())
         self.assertIn("Cash Bill", html)
-
-    def test_the_clerk_name_is_escaped(self):
-        html = build(sample_report(billing=sample_bill(billed_by="<i>N</i>")),
-                     sample_profile())
-        self.assertNotIn("<i>N</i>", html)
 
     def test_unicode_names_render(self):
         html = build(sample_report(patient_name="रमेश"), sample_profile())

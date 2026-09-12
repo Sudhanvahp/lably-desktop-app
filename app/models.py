@@ -6,6 +6,7 @@ from typing import List, Dict, Any
 @dataclass
 class LabProfile:
     lab_name: str = ""
+    lab_subtitle: str = ""      # the line under the name, e.g. "Family Clinic"
     address1: str = ""
     address2: str = ""
     phone: str = ""
@@ -119,6 +120,7 @@ class Billing:
 class Report:
     id: str = ""
     report_no: str = ""
+    title: str = ""             # Mr / Mrs / Miss ... printed before the name
     patient_name: str = ""
     age: str = ""
     age_unit: str = "Y"
@@ -154,12 +156,17 @@ class Report:
         d["billing"] = self.billing.to_dict()
         return d
 
+    def display_name(self) -> str:
+        """The name as it prints: 'Mrs. Hemavathi', or just the name."""
+        return " ".join(part for part in (self.title, self.patient_name) if part)
+
     def index_entry(self) -> Dict[str, Any]:
         return {
             "id": self.id,
             "report_no": self.report_no,
             "bill_no": self.billing.bill_no,
             "patient_name": self.patient_name,
+            "title": self.title,
             "patient_id": self.patient_id,
             "age": f"{self.age}{self.age_unit}" if self.age else "",
             "sex": self.sex,

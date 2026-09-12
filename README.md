@@ -21,22 +21,24 @@ Or just double-click **run.bat**.
 ## First use
 
 Open the **Laboratory Profile** tab (the app starts there until it's filled in) and enter the
-laboratory name, address, phone, registration number, **lab timings** and the
-**holidays** (free text, optional - e.g. "Sundays & public holidays"), pathologist name
-and degrees, the **lab technician's name**, and pick a logo and the two signature images.
-Three people sign the foot of every report, left to right: the person who raised the bill
-(a blank line to sign by hand, under the *Billed By* name), the lab technician, and the
-pathologist. The letterhead prints centred on the page, with the timings and holidays
-on their own line under the contact details - change them in the profile and every
-report printed from then on carries the new ones. A live preview shows the letterhead
+laboratory name and its **sub-heading** (e.g. "Family Clinic" - both print in blue, centred,
+at the top of every report), address, phone, email, registration number, **lab timings** and
+**holidays** (free text, optional - e.g. "Sundays & public holidays"), pathologist name and
+degrees, the **lab technician's name**, and pick a logo and the two signature images.
+The report is deliberately plain - black type on white, thin rules, nothing bold except the
+patient's name - and sized so one full panel with its bill and signatures fits one A4 sheet.
+The address, contact details, timings and holidays print in the **footer**. The lab
+technician (left) and the pathologist (right) sign the foot of every report, on one line. Change anything in the profile and every report printed from then on carries
+the new details. A live preview shows the letterhead
 exactly as it will print. Chosen images are copied into the app's own `assets` folder, so the report keeps
 working even if you later move or delete the originals.
 
 ## Making a report
 
-1. **New Report** tab: enter patient name, age, sex, referring doctor, sample details.
-   The report number, the **Patient ID** and both timestamps are filled in automatically.
-   The Patient ID (`PID-000001`, `PID-000002`, ...) is a read-only unique key: it is
+1. **New Report** tab: pick the title (Mr. / Mrs. / Miss ... - it follows the sex field,
+   and can be changed by hand), enter the patient's name, age, sex, referring doctor
+   (*Ref. By*) and sample details. The report number, the **Patient ID** and both
+   timestamps are filled in automatically. The Patient ID (`HFCD-000001`, `HFCD-000002`, ...) is a read-only unique key: it is
    checked against every stored report before being handed out, so it can never
    collide - even after restoring a backup. Reopening a report keeps its ID, and
    **Duplicate as New** reuses the same ID so repeat visits by one patient stay linked.
@@ -48,7 +50,9 @@ working even if you later move or delete the originals.
    that isn't in the built-in panels.
 5. **Billing Details** at the foot of the page prices the work. Every panel you
    ticked appears as one line - a lab bills for "CBC", not for each of its fifteen
-   components - and the total, net payable and balance recalculate as you type.
+   components - filled in with the panel's standing **price** from Test Templates if
+   one is set, and the total, net payable and balance recalculate as you type.
+   Tests and bill lines are numbered (Sl. No.) on screen and on the printout.
    Enter the **Net Deposit** if the patient has paid something; the **Balance** is
    red while anything is owed and green once it is settled. Leave it all blank and
    nothing about the report changes. **Preview Bill / Bill PDF / Print Bill** on that
@@ -102,9 +106,6 @@ document quietly acquiring the other's furniture.
 |               Rupees Only           | Balance         |         0.00 |   |
 |                                     +-----------------+--------------+   |
 |                                                                          |
-| Miss. NETHRA H M                    Miss. NETHRA H M                     |
-| Printed By                          Billed By                            |
-|                                                                          |
 | Note:                                                                    |
 | 1.  Please bring receipt while collecting the report                     |
 | 2.  Beyond 01 month reports will not be preserved                        |
@@ -147,11 +148,10 @@ The two identity columns are separate tables inside a 50/50 shell, because in on
 six-column table a long doctor's name on the right narrows the patient's name on
 the left until it wraps.
 
-The heading is the **bill type**, so a credit bill titles itself *Credit Bill*.
-The **Printed By / Billed By** pair is one stored name printed twice: the app has
-no user accounts, so the person who raised the bill is the person standing at the
-printer, and a second field that could only ever hold the same value would be
-furniture rather than data.
+The heading is always *Cash Bill*: the bill-type choice and the Printed By /
+Billed By names were removed at the lab's request. A bill stored by an earlier
+build with another type or a clerk's name keeps them in its data file; the type
+still titles that bill when reprinted, the name never prints.
 
 One deviation, deliberate: the lab's slip prints the fourth column header as
 **Net Am** where the word is cut short. This prints **Net Amount**. Everything
@@ -165,8 +165,6 @@ else matches the slip field for field.
 | Amount | Typed per service |
 | Total Billed | Sum of the priced lines |
 | Net Payable | The total billed - see below |
-| Bill Type | Chosen; also titles the printed bill |
-| Billed By | Typed, prefilled from the Laboratory Profile |
 | Net Deposit | Typed; what the patient has already paid |
 | Balance | Net Payable - Net Deposit |
 
@@ -273,6 +271,9 @@ guarded by tests:
 The six built-in panels are only a starting point. The **Test Templates** page
 lets you build the panels your lab actually runs, once:
 
+* **Set a price** for a panel. Type it once in the Price box above the panel's tests;
+  every report that ticks the panel starts its bill line at that amount, which can
+  still be overwritten on any one bill. Leave it blank to type the amount each time.
 * **Create your own panels** (Urine Routine, Semen Analysis, whatever you run).
 * **Add sub-headings** inside a panel - a section title such as
   `DIFFERENTIAL COUNT` or `PHYSICAL EXAMINATION`. A heading has no result, unit
@@ -351,8 +352,6 @@ Validation works in two layers, in [app/validators.py](app/validators.py):
 | Result | Number **or** qualitative word, max 40 chars |
 | Unit | A unit, not prose: `g/dL`, `%`, `/cmm`, `mm/1st hr`, `10^3/uL`. A bare number is refused |
 | Reference range | A range (`13.0 - 17.0`), a bound (`< 200`), or a single qualitative word (`Absent`) |
-| Bill Type | Fixed choices: Cash / Credit / Insurance Bill |
-| Billed By | Letters and name punctuation, max 40. Optional |
 | Bill Notes (profile) | Up to 6 lines, 150 characters each. Blank means no footer |
 | Bill No | Letters, digits, spaces and `/ -`, max 24. Blank is filled in on save |
 | Bill Date | A **day picker**, not text |

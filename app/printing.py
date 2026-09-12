@@ -20,9 +20,12 @@ class Page(NamedTuple):
     size: QPageSize.PageSizeId
     orientation: QPageLayout.Orientation
     margins: QMarginsF
+    # The document's base font. Qt sizes every table row by this, whatever
+    # the stylesheet says, so it is what decides how many rows fit a page.
+    font_pt: float = 10
 
 
-REPORT_PAGE = Page(QPageSize.A4, QPageLayout.Portrait, QMarginsF(14, 13, 14, 13))
+REPORT_PAGE = Page(QPageSize.A4, QPageLayout.Portrait, QMarginsF(12, 8, 12, 8), 8)
 
 # Tighter margins than the report: an A5 slip has little enough room as it is,
 # and the bill draws its own ruled frame, so the paper margin only has to clear
@@ -39,11 +42,13 @@ def _configure(printer: QPrinter, page: Page = REPORT_PAGE) -> None:
     ))
 
 
-def _document(html: str, printer: QPrinter) -> QTextDocument:
+def _document(html: str, printer: QPrinter, page: Page = REPORT_PAGE) -> QTextDocument:
     doc = QTextDocument()
     # A named default font keeps metrics stable across machines; the document
     # margin is zeroed because the page layout above already owns the margins.
-    doc.setDefaultFont(QFont("Segoe UI", 10))
+    font = QFont("Segoe UI")
+    font.setPointSizeF(page.font_pt)
+    doc.setDefaultFont(font)
     doc.setDocumentMargin(0)
     doc.setHtml(html)
     rect = printer.pageRect(QPrinter.Point)
@@ -64,7 +69,7 @@ def print_report(html: str, parent=None, title: str = "Print Blood Report",
     dialog.setWindowTitle(title)
     if dialog.exec() != QPrintDialog.Accepted:
         return False
-    _document(html, printer).print_(printer)
+    _document(html, printer, page).print_(printer)
     return True
 
 
@@ -75,7 +80,7 @@ def preview_report(html: str, parent=None, title: str = "Print Preview",
     dialog = QPrintPreviewDialog(printer, parent)
     dialog.setWindowTitle(title)
     dialog.resize(900, 950)
-    dialog.paintRequested.connect(lambda p: _document(html, p).print_(p))
+    dialog.paintRequested.connect(lambda p: _document(html, p, page).print_(p))
     dialog.exec()
 
 
@@ -84,4 +89,4 @@ def export_pdf(html: str, path: str, page: Page = REPORT_PAGE) -> None:
     printer.setOutputFormat(QPrinter.PdfFormat)
     printer.setOutputFileName(path)
     _configure(printer, page)
-    _document(html, printer).print_(printer)
+    _document(html, printer, page).print_(printer)

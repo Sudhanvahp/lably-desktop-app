@@ -186,7 +186,7 @@ class SelectionTests(UICase):
 class PatientIdTests(UICase):
     def test_patient_id_is_read_only_and_prefilled(self):
         self.assertTrue(self.form.f_pid.isReadOnly())
-        self.assertEqual(self.form.f_pid.text(), "PID-000001")
+        self.assertEqual(self.form.f_pid.text(), "HFCD-000001")
 
     def test_each_saved_report_gets_a_unique_id(self):
         ids = []
@@ -1588,7 +1588,7 @@ class BillingFormTests(UICase):
         self.assertEqual(report.patient_name, "Jane Doe")
         self.assertEqual(report.rows[0].result, "14.0")
         self.assertTrue(report.report_no.startswith("BR-"))
-        self.assertTrue(report.patient_id.startswith("PID-"))
+        self.assertTrue(report.patient_id.startswith("HFCD-"))
 
         self.history.reload()
         self.assertEqual(self.history.table.rowCount(), 1)
@@ -1767,36 +1767,44 @@ class BillFieldTests(UICase):
         self.form.bill_table.item(0, 1).setText("400")
         self.form.f_deposit.setText("400")
 
-    def test_a_new_bill_starts_as_a_cash_bill(self):
+    def test_a_new_bill_is_a_cash_bill_with_no_field_to_choose(self):
+        """The type is not on the form any more; every bill is the default."""
         from app import billing
 
-        self.assertEqual(self.form.f_bill_type.currentText(),
+        self.assertFalse(hasattr(self.form, "f_bill_type"))
+        self.billed()
+        self.assertEqual(self.form._collect_billing().bill_type,
                          billing.DEFAULT_BILL_TYPE)
+        self.assertIn("Cash Bill", self.form._bill_html())
 
-    def test_the_bill_type_titles_the_printed_bill(self):
+    def test_a_bill_stored_with_another_type_keeps_it(self):
         self.billed()
-        self.form.f_bill_type.setCurrentText("Credit Bill")
-        self.assertIn("Credit Bill", self.form._bill_html())
-        self.assertNotIn("Cash Bill", self.form._bill_html())
-
-    def test_the_billed_by_name_is_prefilled_from_the_profile(self):
-        self.storage.save_profile(LabProfile(lab_name="Test Lab",
-                                             billed_by="Miss. Nethra H M"))
+        self.form.save()
+        report = self.storage.load_report(self.form.current_id)
+        report.billing.bill_type = "Credit Bill"
+        self.storage.save_report(report)
         self.form.new_report()
-        self.assertEqual(self.form.f_billed_by.text(), "Miss. Nethra H M")
+        self.form.load_report(self.storage.load_report(report.id))
+        self.assertEqual(self.form._collect_billing().bill_type, "Credit Bill")
+        self.assertIn("Credit Bill", self.form._bill_html())
 
-    def test_the_billed_by_name_prints_in_both_slots(self):
+    def test_there_is_no_billed_by_field(self):
+        self.assertFalse(hasattr(self.form, "f_billed_by"))
         self.billed()
-        self.form.f_billed_by.setText("Miss. Nethra H M")
-        html = self.form._bill_html()
-        self.assertEqual(html.count("Miss. Nethra H M"), 2)
-        self.assertIn("Printed By", html)
-        self.assertIn("Billed By", html)
+        self.assertEqual(self.form._collect_billing().billed_by, "")
+        self.assertNotIn("Billed By", self.form._bill_html())
+        self.assertNotIn("Billed By", self.form._html())
 
-    def test_typing_digits_into_billed_by_is_blocked(self):
-        self.form.f_billed_by.clear()
-        QTest.keyClicks(self.form.f_billed_by, "N3thra")
-        self.assertEqual(self.form.f_billed_by.text(), "Nthra")
+    def test_a_stored_billed_by_name_survives_a_resave_unseen(self):
+        self.billed()
+        self.form.save()
+        report = self.storage.load_report(self.form.current_id)
+        report.billing.billed_by = "Miss. Nethra H M"
+        self.storage.save_report(report)
+        self.form.new_report()
+        self.form.load_report(self.storage.load_report(report.id))
+        self.assertEqual(self.form._collect_billing().billed_by, "Miss. Nethra H M")
+        self.assertNotIn("Miss. Nethra H M", self.form._bill_html())
 
     def test_the_bill_date_carries_a_time(self):
         self.billed()
@@ -1805,17 +1813,11 @@ class BillFieldTests(UICase):
 
     def test_the_new_fields_are_saved_and_reloaded(self):
         self.billed()
-        self.form.f_bill_type.setCurrentText("Credit Bill")
-        self.form.f_billed_by.setText("Miss. Nethra H M")
         self.form.save()
         report = self.storage.load_report(self.form.current_id)
-        self.assertEqual(report.billing.bill_type, "Credit Bill")
-        self.assertEqual(report.billing.billed_by, "Miss. Nethra H M")
 
         self.form.new_report()
         self.form.load_report(report)
-        self.assertEqual(self.form.f_bill_type.currentText(), "Credit Bill")
-        self.assertEqual(self.form.f_billed_by.text(), "Miss. Nethra H M")
         self.assertEqual(
             self.form.f_bill_date.dateTime().toString("dd-MM-yyyy hh:mm:ss AP"),
             report.billing.bill_date)
@@ -1824,8 +1826,8 @@ class BillFieldTests(UICase):
         self.billed()
         self.form.save()
         self.form.load_report(self.storage.load_report(self.form.current_id))
-        self.assertTrue(self.form.f_billed_by.isReadOnly())
-        self.assertFalse(self.form.f_bill_type.isEnabled())
+        self.assertTrue(self.form.f_bill_no.isReadOnly())
+        self.assertFalse(self.form.f_title.isEnabled())
 
     def test_a_bill_written_by_the_first_build_reopens(self):
         """Those bills stored the day alone and had no type or clerk."""
@@ -1843,7 +1845,7 @@ class BillFieldTests(UICase):
         self.form.load_report(self.storage.load_report(report.id))
         self.assertEqual(
             self.form.f_bill_date.dateTime().toString("dd-MM-yyyy"), "30-08-2026")
-        self.assertEqual(self.form.f_bill_type.currentText(), "Cash Bill")
+        self.assertEqual(self.form._collect_billing().bill_type, "Cash Bill")
         self.assertIn("30-Aug-2026", self.form._bill_html())
 
     def test_the_profile_notes_reach_the_bill(self):
@@ -1864,20 +1866,18 @@ class LabProfileBillFieldTests(UICase):
     def test_the_settings_page_carries_the_new_fields(self):
         settings = self.window.settings
         self.assertIn("mobile", settings.edits)
-        self.assertIn("billed_by", settings.edits)
+        self.assertNotIn("billed_by", settings.edits)
         self.assertIsNotNone(settings.bill_notes)
 
     def test_they_save_and_reload(self):
         settings = self.window.settings
         settings.edits["lab_name"].setText("Mallige Diagnostic Center")
         settings.edits["mobile"].setText("9964725222")
-        settings.edits["billed_by"].setText("Miss. Nethra H M")
         settings.bill_notes.setPlainText("First note\nSecond note")
         settings.save()
 
         profile = self.storage.load_profile()
         self.assertEqual(profile.mobile, "+91 9964725222")
-        self.assertEqual(profile.billed_by, "Miss. Nethra H M")
         self.assertEqual(profile.bill_notes, "First note\nSecond note")
 
         settings.load()
@@ -1963,6 +1963,7 @@ class BillPageSizeTests(UICase):
         for name, page in (("report", printing.REPORT_PAGE),
                            ("bill", printing.BILL_PAGE)):
             printer = QPrinter(QPrinter.HighResolution)
+            printer.setOutputFormat(QPrinter.PdfFormat)
             printing._configure(printer, page)
             rect = printer.paperRect(QPrinter.Point)
             sizes[name] = (rect.width(), rect.height())
@@ -2018,10 +2019,14 @@ class BillLayoutTests(UICase):
         from app import printing
         from app.bill_html import build
 
+        # A PDF printer: it honours any page size, where a physical default
+        # printer that only knows Letter would quietly swap the A5 for it.
         printer = QPrinter(QPrinter.HighResolution)
+        printer.setOutputFormat(QPrinter.PdfFormat)
         printing._configure(printer, printing.BILL_PAGE)
         doc = printing._document(
-            build(report, profile or self.storage.load_profile()), printer)
+            build(report, profile or self.storage.load_profile()), printer,
+            printing.BILL_PAGE)
         return doc
 
     def full_profile(self):
@@ -2085,8 +2090,8 @@ class BillLayoutTests(UICase):
         than by measuring the finished bill: the real page is laid out in the
         printer's font at the printer's resolution, so a height measured here
         would only be describing this machine."""
-        squeezed = self.measure("", "Net Payable Amt")
-        held = self.measure("white-space:nowrap;", "Net Payable Amt")
+        squeezed = self.measure("", "Net Payable Amt", width=50)
+        held = self.measure("white-space:nowrap;", "Net Payable Amt", width=50)
         self.assertGreater(squeezed, held)
         self.assertLess(held, squeezed / 2)
 
@@ -2236,3 +2241,124 @@ class DrivePromptTests(UICase):
         self._fill_and_save()
         self.assertEqual(self.storage.load_profile().backup_dir, "")
         self.assertEqual(self.messages[-2][1], "warning")
+
+
+class TitleFieldTests(UICase):
+    def test_a_new_report_defaults_to_mr(self):
+        self.assertEqual(self.form.f_title.currentText(), "Mr.")
+
+    def test_choosing_female_moves_the_title_to_mrs(self):
+        self.form.f_sex.setCurrentText("F")
+        self.assertEqual(self.form.f_title.currentText(), "Mrs.")
+        self.form.f_sex.setCurrentText("M")
+        self.assertEqual(self.form.f_title.currentText(), "Mr.")
+
+    def test_a_hand_picked_title_that_fits_is_kept(self):
+        self.form.f_sex.setCurrentText("F")
+        self.form.f_title.setCurrentText("Miss")
+        self.form.f_sex.setCurrentText("F")
+        self.assertEqual(self.form.f_title.currentText(), "Miss")
+
+    def test_the_title_is_saved_reloaded_and_printed(self):
+        self.fill(name="Hemavathi")
+        self.form.f_sex.setCurrentText("F")
+        self.form.f_title.setCurrentText("Mrs.")
+        self.form.save()
+        report = self.storage.load_report(self.form.current_id)
+        self.assertEqual(report.title, "Mrs.")
+        self.assertIn("<b>Mrs. Hemavathi</b>", self.form._html())
+        self.form.new_report()
+        self.form.load_report(report)
+        self.assertEqual(self.form.f_title.currentText(), "Mrs.")
+
+    def test_the_label_reads_ref_by(self):
+        from PySide6.QtWidgets import QLabel
+        labels = [w.text() for w in self.form.findChildren(QLabel)]
+        self.assertIn("Ref. By:", labels)
+        self.assertNotIn("Referred By:", labels)
+
+
+class PanelPriceTests(UICase):
+    def test_a_priced_panel_fills_its_amount_when_ticked(self):
+        from app import templates
+        templates.set_price(CBC, "450")
+        self.fill()
+        self.assertEqual(self.form.bill_table.item(0, 1).text(), "450")
+        self.assertEqual(self.form.l_total.text(), "450.00")
+
+    def test_an_unpriced_panel_still_starts_blank(self):
+        self.fill()
+        self.assertEqual(self.form.bill_table.item(0, 1).text(), "")
+
+    def test_a_typed_amount_wins_over_the_standing_price(self):
+        from app import templates
+        templates.set_price(CBC, "450")
+        self.fill()
+        self.form.bill_table.item(0, 1).setText("400")
+        self.form.panel_boxes["Lipid Profile"].setChecked(True)
+        self.assertEqual(self.form.bill_table.item(0, 1).text(), "400")
+
+    def test_the_templates_page_edits_the_price(self):
+        from app import templates
+        view = self.window.templates
+        view.reload(select=CBC)
+        view.price.setText("325.50")
+        view.save_panel()
+        self.assertEqual(templates.price_for(CBC), "325.50")
+        view.reload(select="Lipid Profile")
+        self.assertEqual(view.price.text(), "")
+        view.reload(select=CBC)
+        self.assertEqual(view.price.text(), "325.50")
+
+    def test_a_bad_price_blocks_the_panel_save(self):
+        view = self.window.templates
+        view.reload(select=CBC)
+        view.price.setText("99999999")
+        view.save_panel()
+        self.assertEqual(self.messages[-1][1], "warning")
+
+
+class HistoryLayoutTests(UICase):
+    def test_the_search_box_sits_above_the_stat_tiles(self):
+        self.history.resize(1000, 700)
+        self.history.show()
+        self.assertLess(self.history.search.geometry().top(),
+                        self.history.stat_total.geometry().top())
+
+
+class ReportPageFitTests(UICase):
+    """A single panel, with its bill and the signatures, fits one A4 sheet."""
+
+    def _profile(self):
+        return LabProfile(
+            lab_name="HEMAVATHI", lab_subtitle="Family Clinic", address1="#12, MG Road",
+            phone="080 2555 1234", mobile="9845012345", email="a@b.com",
+            reg_no="KA/1", timings="Mon-Sat 7-8", holidays="Sundays",
+            pathologist="Dr. A. Rao", pathologist_degrees="MD", technician="S. Kumar",
+            billed_by="Miss. Nethra", footer_note="Computer generated report.")
+
+    def _pages(self, panels):
+        from PySide6.QtPrintSupport import QPrinter
+        from app import printing, templates
+        from app.models import BillItem, Billing, Report, TestRow
+        from app.report_html import build
+        rows = [TestRow(p, r["name"], "5.0", r["unit"], templates.ref_for(r, "F"),
+                        r.get("kind", "test"))
+                for p in panels for r in templates.rows_for(p)]
+        report = Report(report_no="BR-1", patient_id="HFCD-1", title="Mrs.",
+                        patient_name="Hemavathi", age="42", sex="F", rows=rows,
+                        remarks="Kindly correlate clinically.",
+                        billing=Billing(bill_no="B-1", bill_date="12-09-2026 08:05:00 AM",
+                                        billed_by="Miss. Nethra", net_deposit="450",
+                                        items=[BillItem(p, "450") for p in panels]))
+        printer = QPrinter(QPrinter.HighResolution)
+        printer.setOutputFormat(QPrinter.PdfFormat)
+        printing._configure(printer, printing.REPORT_PAGE)
+        return printing._document(build(report, self._profile()), printer,
+                                  printing.REPORT_PAGE).pageCount()
+
+    def test_a_full_cbc_fits_one_page(self):
+        self.assertEqual(self._pages([CBC]), 1)
+
+    def test_a_short_panel_fits_one_page(self):
+        self.assertEqual(self._pages(["Blood Sugar"]), 1)

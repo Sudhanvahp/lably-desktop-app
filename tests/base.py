@@ -9,6 +9,12 @@ import tempfile
 import unittest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+# The offscreen platform has no font database of its own, so without this it
+# lays text out with a stand-in font whose metrics are nothing like the
+# printer's. Pointing it at the system fonts makes every page-count and
+# layout test measure what the printer will actually produce.
+if os.name == "nt":
+    os.environ.setdefault("QT_QPA_FONTDIR", os.path.join(os.environ.get("WINDIR", r"C:\Windows"), "Fonts"))
 
 
 class SandboxCase(unittest.TestCase):

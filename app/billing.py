@@ -156,8 +156,15 @@ def sync_items(billing: Billing, rows: List[Any]) -> List[BillItem]:
     bill moves.
     """
     priced = {item.service: item.amount for item in billing.items}
-    return [BillItem(service=name, amount=priced.get(name, ""))
+    return [BillItem(service=name, amount=priced.get(name, default_price(name)))
             for name in billable_services(rows)]
+
+
+def default_price(service: str) -> str:
+    """What a freshly added service line starts at: the panel's standing
+    charge from Test Templates, or blank when none is set."""
+    from . import templates   # local: templates imports storage, storage imports billing
+    return templates.price_for(service)
 
 
 # --------------------------------------------------------------------------

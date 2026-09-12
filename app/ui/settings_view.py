@@ -13,7 +13,7 @@ from .. import security, storage
 from ..billing import DEFAULT_BILL_NOTES
 from ..models import LabProfile
 from .. import validators as V
-from ..report_html import CSS, letterhead
+from ..report_html import CSS, footer, letterhead
 from . import icons
 from .theme import MUTED, S2, S3
 from .widgets import Card, PageHeader, icon_button
@@ -82,6 +82,7 @@ class SettingsView(QWidget):
 
     FIELDS = [
         ("lab_name", "Laboratory Name"),
+        ("lab_subtitle", "Sub-heading"),
         ("address1", "Address Line 1"),
         ("address2", "Address Line 2"),
         ("phone", "Phone"),
@@ -94,7 +95,6 @@ class SettingsView(QWidget):
         ("pathologist_degrees", "Degrees / Qualification"),
         ("technician", "Lab Technician"),
         ("footer_note", "Footer Note"),
-        ("billed_by", "Billed By"),
     ]
 
     def __init__(self):
@@ -108,7 +108,6 @@ class SettingsView(QWidget):
         patterns = {
             "phone": V.PHONE_PATTERN,
             "mobile": V.PHONE_PATTERN,
-            "billed_by": V.DOCTOR_PATTERN,
             "email": V.EMAIL_PATTERN,
             "reg_no": V.REG_NO_PATTERN,
             "timings": V.TEXT_LINE_PATTERN,
@@ -116,6 +115,7 @@ class SettingsView(QWidget):
             "pathologist": V.DOCTOR_PATTERN,
             "technician": V.DOCTOR_PATTERN,
             "lab_name": V.TEXT_LINE_PATTERN,
+            "lab_subtitle": V.TEXT_LINE_PATTERN,
             "address1": V.TEXT_LINE_PATTERN,
             "address2": V.TEXT_LINE_PATTERN,
             "pathologist_degrees": V.TEXT_LINE_PATTERN,
@@ -124,8 +124,8 @@ class SettingsView(QWidget):
         placeholders = {
             "phone": "+91 8025551234",
             "mobile": "+91 9845012345",
-            "billed_by": "Name printed on the bill as Printed By / Billed By",
             "email": "lab@example.com",
+            "lab_subtitle": "e.g. Family Clinic - printed under the name",
             "timings": "Mon-Sat 7:00 AM - 8:00 PM, Sun 7:00 AM - 1:00 PM",
             "holidays": "Sundays and public holidays (optional)",
             "pathologist": "Dr. A. Rao",
@@ -189,8 +189,8 @@ class SettingsView(QWidget):
 
         self.preview = QTextBrowser()
         self.preview.setMinimumHeight(168)
-        preview_box = Card("Letterhead Preview",
-                           "exactly how the top of the report will print",
+        preview_box = Card("Letterhead and Footer Preview",
+                           "exactly how the top and the foot of the report will print",
                            elevated=False)
         preview_box.add(self.preview)
 
@@ -447,7 +447,8 @@ class SettingsView(QWidget):
         return profile
 
     def _refresh_preview(self):
-        html = letterhead(self.current_profile())
+        profile = self.current_profile()
+        html = letterhead(profile) + footer(profile)
         self.preview.setHtml(f"<html><head><style>{CSS}</style></head><body>{html}</body></html>")
 
     def save(self):
@@ -455,6 +456,7 @@ class SettingsView(QWidget):
         problem = V.first_error(
             "Enter the laboratory name before saving." if not profile.lab_name else None,
             V.check_text_line(profile.lab_name, "Laboratory name"),
+            V.check_text_line(profile.lab_subtitle, "Sub-heading"),
             V.check_text_line(profile.address1, "Address line 1"),
             V.check_text_line(profile.address2, "Address line 2"),
             V.check_phone(profile.phone, "laboratory phone number"),
@@ -463,7 +465,6 @@ class SettingsView(QWidget):
             V.check_text_line(profile.holidays, "Holidays"),
             V.check_email(profile.email),
             storage.check_backup_dir(profile.backup_dir),
-            V.check_optional_name(profile.billed_by, "billed-by name"),
             V.check_bill_notes(profile.bill_notes),
             V.check_optional_name(profile.pathologist, "pathologist's name"),
             V.check_optional_name(profile.technician, "lab technician's name"),

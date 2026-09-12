@@ -13,7 +13,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from .billing import BILL_DATE_FMT
-from .branding import DATA_FOLDER
+from .branding import DATA_FOLDER, PATIENT_ID_PREFIX
 from .models import LabProfile, Report
 
 
@@ -136,7 +136,11 @@ def _counters() -> Dict[str, int]:
     index = load_index()
     for entry in index:
         last = max(last, _serial(entry.get("report_no"), "BR-"))
-        last_patient = max(last_patient, _serial(entry.get("patient_id"), "PID-"))
+        # Both prefixes are floored: IDs handed out as PID- before the rename
+        # still occupy their numbers, so the sequence carries on rather than
+        # restarting at 1 under the new prefix.
+        for prefix in (PATIENT_ID_PREFIX, "PID-"):
+            last_patient = max(last_patient, _serial(entry.get("patient_id"), prefix))
         last_bill = max(last_bill, _serial(entry.get("bill_no"), "BILL-"))
     return {"last": last, "last_patient": last_patient, "last_bill": last_bill}
 
@@ -176,7 +180,7 @@ def peek_patient_id() -> str:
     n = _counters()["last_patient"]
     while True:
         n += 1
-        candidate = f"PID-{n:06d}"
+        candidate = f"{PATIENT_ID_PREFIX}{n:06d}"
         if candidate not in used:
             return candidate
 
@@ -189,14 +193,21 @@ def next_patient_id() -> str:
     c = _counters()
     while True:
         c["last_patient"] += 1
-        candidate = f"PID-{c['last_patient']:06d}"
+        candidate = f"{PATIENT_ID_PREFIX}{c['last_patient']:06d}"
         if candidate not in used:
             _write_json(_p("counter.json"), c)
             return candidate
 
 
 def new_report_id() -> str:
-    return datetime.now().strftime("%Y%m%d-%H%M%S-") + uuid.uuid4().hex[:4]
+    """A fresh id: a timestamp (so the files sort by day) and enough random
+    hex that two reports saved in the same second cannot share one - and a
+    check on disk, so even a repeat is caught rather than overwriting."""
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S-")
+    while True:
+        candidate = stamp + uuid.uuid4().hex[:8]
+        if not os.path.exists(os.path.join(reports_dir(), candidate + ".json")):
+            return candidate
 
 
 # --------------------------------------------------------------------------

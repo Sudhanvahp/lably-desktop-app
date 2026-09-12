@@ -70,22 +70,36 @@ def _hrule() -> str:
 # the parts
 # --------------------------------------------------------------------------
 def letterhead(lab: LabProfile) -> str:
-    """Centred, black, no logo: the identity block as it prints on the slip."""
+    """Centred, black, no logo: the name and its sub-heading, nothing else -
+    the same top as the report. Contact details print in the footer."""
     lines = [
         f'<div class="labname">{escape(lab.lab_name or "LABORATORY NAME")}</div>'
     ]
-    for text in (lab.address1, lab.address2):
-        if text:
-            lines.append(f'<div class="labline">{escape(text)}</div>')
-
-    contact = []
-    if lab.phone:
-        contact.append(f"Ph: {escape(lab.phone)}")
-    if lab.mobile:
-        contact.append(f"Mob: {escape(lab.mobile)}")
-    if contact:
-        lines.append(f'<div class="labline">{" ".join(contact)}</div>')
+    if lab.lab_subtitle:
+        lines.append(f'<div class="labsub">{escape(lab.lab_subtitle)}</div>')
     return f'<div align="center">{"".join(lines)}</div>'
+
+
+def footer(lab: LabProfile) -> str:
+    """Address, numbers, email, registration, hours - the lines the report
+    carries in its footer, set the same way here so the two documents agree."""
+    lines = []
+    address = ", ".join(part for part in (lab.address1, lab.address2) if part)
+    if address:
+        lines.append(escape(address))
+    contact = [f"{label}: {escape(value)}" for label, value in
+               (("Ph", lab.phone), ("Mob", lab.mobile), ("Email", lab.email),
+                ("Reg. No", lab.reg_no)) if value]
+    if contact:
+        lines.append(" &middot; ".join(contact))
+    hours = [f"{label}: {escape(value)}" for label, value in
+             (("Timings", lab.timings), ("Holidays", lab.holidays)) if value]
+    if hours:
+        lines.append(" &middot; ".join(hours))
+    if not lines:
+        return ""
+    return '<div align="center">' + "".join(
+        f'<div class="labline">{line}</div>' for line in lines) + "</div>"
 
 
 def _heading(r: Report) -> str:
@@ -118,7 +132,7 @@ def _identity(r: Report) -> str:
     # breakable, because an unusually long one should wrap rather than shove the
     # column it lives in over the top of its neighbour.
     left: List[Tuple[str, str, bool, bool]] = [
-        ("Patient Name", r.patient_name, True, False),
+        ("Patient Name", r.display_name(), True, False),
         ("Patient No", r.patient_id, False, True),
         ("Age/Gender", _age_sex(r), True, True),
         ("Phone No", r.phone, True, True),
@@ -126,11 +140,15 @@ def _identity(r: Report) -> str:
     right: List[Tuple[str, str, bool, bool]] = [
         ("Bill No", r.billing.bill_no, False, True),
         ("Bill Date", format_bill_date(r.billing.bill_date), False, True),
-        ("Bill Type", r.billing.bill_type or DEFAULT_BILL_TYPE, False, True),
-        ("Doctor", r.referred_by, True, False),
+        ("Ref. By", r.referred_by, True, False),
+        ("", "", False, False),
     ]
 
     def row(key: str, value: str, heavy: bool, tight: bool) -> str:
+        if not key:
+            # A filler row keeps the two columns four rows tall each, so the
+            # bill's shape does not change from one to the next.
+            return '<tr><td colspan="3">&nbsp;</td></tr>'
         shown = escape(value)
         if heavy and shown:
             shown = f"<b>{shown}</b>"
@@ -257,23 +275,10 @@ def _amount_words(r: Report) -> str:
 
 
 def _signatories(r: Report) -> str:
-    """Name above, role beneath - the way the slip sets them.
-
-    One stored name fills both slots. The app has no user accounts, so the person
-    who raised the bill is the person standing at the printer; inventing a second
-    field that can only ever hold the same value would be furniture, not data.
-    """
-    name = escape(r.billing.billed_by)
-    if not name:
-        return ""
-    cell = f'<div class="signname">{name}</div><div class="signrole">%s</div>'
-    return _plain(
-        "<tr>"
-        f'<td width="62%" class="td">{cell % "Printed By"}</td>'
-        f'<td width="38%" class="td">{cell % "Billed By"}</td>'
-        "</tr>",
-        padding=2,
-    )
+    """The slip no longer names who printed or billed it: the lab asked for the
+    field to go. Bills stored with a name keep it in the data file; nothing
+    prints. Kept as a function so the page assembly below stays readable."""
+    return ""
 
 
 def _notes(lab: LabProfile) -> str:
@@ -293,7 +298,8 @@ CSS = f"""
 body {{ font-family: Arial, 'Helvetica Neue', 'Segoe UI', sans-serif;
         font-size: 7pt; color: {INK}; }}
 .labname {{ font-size: 12pt; font-weight: bold; }}
-.labline {{ font-size: 7pt; }}
+.labsub {{ font-size: 8pt; }}
+.labline {{ font-size: 6.5pt; }}
 .heading {{ font-size: 8.5pt; font-weight: bold; }}
 /* Every fixed-format cell is nowrap. A printer page is laid out at the
    printer's own resolution, not the screen's, so the exact width a label gets
@@ -361,6 +367,11 @@ def build(report: Report, lab: LabProfile) -> str:
     notes = _notes(lab)
     if notes:
         bands.append(_band(notes, top=5))
+
+    foot = footer(lab)
+    if foot:
+        bands.append(_band(_hrule(), top=4))
+        bands.append(_band(foot, top=2))
 
     # Everything sits inside one ruled rectangle - the slip is a form, and a form
     # has an edge. It also makes a short bill read as finished rather than as a

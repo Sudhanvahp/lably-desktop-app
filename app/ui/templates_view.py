@@ -1,12 +1,12 @@
 """Test Templates: create and edit the panels offered on the New Report page."""
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
-    QAbstractItemView, QHBoxLayout, QHeaderView, QInputDialog, QLabel, QListWidget,
-    QListWidgetItem, QMessageBox, QTableWidget, QTableWidgetItem, QVBoxLayout,
-    QWidget,
+    QAbstractItemView, QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit,
+    QListWidget, QListWidgetItem, QMessageBox, QTableWidget, QTableWidgetItem,
+    QVBoxLayout, QWidget,
 )
 
-from .. import templates
+from .. import billing, templates
 from .. import validators as V
 from . import icons
 from .theme import ACCENT_DARK, DANGER, MUTED, S2, S3, SURFACE_ALT
@@ -80,6 +80,27 @@ class TemplatesView(QWidget):
         self.status = QLabel("")
         self.status.setObjectName("CardHint")
         card.add_header_widget(self.status)
+
+        # The panel's standing charge. Typed once here, it fills the amount on
+        # every bill that ticks the panel; the bill can still overwrite it.
+        price_row = QHBoxLayout()
+        price_row.setSpacing(S2)
+        price_label = QLabel(f"Price ({billing.CURRENCY}):")
+        price_label.setObjectName("FieldLabel")
+        self.price = QLineEdit()
+        self.price.setValidator(V.validator(V.AMOUNT_PATTERN, self))
+        self.price.setMaxLength(10)
+        self.price.setPlaceholderText("e.g. 250.00")
+        self.price.setFixedWidth(140)
+        self.price.textChanged.connect(self._mark_dirty_price)
+        price_hint = QLabel("Charged automatically whenever this panel is added "
+                            "to a report. Leave blank to type the amount each time.")
+        price_hint.setObjectName("Hint")
+        price_hint.setWordWrap(True)
+        price_row.addWidget(price_label)
+        price_row.addWidget(self.price)
+        price_row.addWidget(price_hint, 1)
+        card.add(price_row)
 
         self.table = QTableWidget(0, len(COLS))
         self.table.setHorizontalHeaderLabels(COLS)
@@ -161,6 +182,9 @@ class TemplatesView(QWidget):
             return
         self.current_panel = current.data(Qt.UserRole)
         self.load_rows(templates.rows_for(self.current_panel))
+        self._loading = True
+        self.price.setText(templates.price_for(self.current_panel))
+        self._loading = False
         builtin = templates.is_builtin(self.current_panel)
         self.reset_button.setEnabled(builtin)
         self.status.setText(
@@ -265,6 +289,10 @@ class TemplatesView(QWidget):
             return
         self._dirty = True
         self._mark_cell(item.row(), item.column())
+
+    def _mark_dirty_price(self, _text):
+        if not self._loading:
+            self._dirty = True
 
     # --------------------------------------------------------------- actions
     def add_test(self):
@@ -395,7 +423,14 @@ class TemplatesView(QWidget):
             self.notify.emit("A panel needs at least one test, not only headings.",
                              "warning")
             return
+        price = self.price.text().strip()
+        problem = V.check_amount(price, "price") if price else None
+        if problem:
+            self.notify.emit(problem, "warning")
+            self.price.setFocus()
+            return
         templates.save_panel(self.current_panel, rows)
+        templates.set_price(self.current_panel, price)
         self._dirty = False
         self.panels_changed.emit()
         self.reload(select=self.current_panel)
