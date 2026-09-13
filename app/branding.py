@@ -11,7 +11,7 @@ PATIENT_ID_PREFIX = "HFCD-"
 # rename: renaming it would orphan every report already on disk.
 DATA_FOLDER = "BloodReportApp"
 
-APP_VERSION = "v1.2"   # centred letterhead, timings, Drive backup, launch splash
+APP_VERSION = "v1.3"   # plain one-page report, panel prices, titles, HFCD ids
 
 # Who made it, shown in the footer under every page. Separate from APP_NAME:
 # the product can be renamed or white-labelled without touching the vendor.

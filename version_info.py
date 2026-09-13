@@ -9,8 +9,8 @@
 # Keep the strings in step with app/branding.py.
 VSVersionInfo(
     ffi=FixedFileInfo(
-        filevers=(1, 2, 0, 0),
-        prodvers=(1, 2, 0, 0),
+        filevers=(1, 3, 0, 0),
+        prodvers=(1, 3, 0, 0),
         mask=0x3F,
         flags=0x0,
         OS=0x40004,
@@ -23,12 +23,12 @@ VSVersionInfo(
             StringTable("040904B0", [
                 StringStruct("CompanyName", "ACHUTHTECH"),
                 StringStruct("FileDescription", "Lably - Blood Report Manager - Developed by ACHUTHTECH"),
-                StringStruct("FileVersion", "1.2.0.0"),
+                StringStruct("FileVersion", "1.3.0.0"),
                 StringStruct("InternalName", "Lably"),
                 StringStruct("LegalCopyright", "Copyright (c) ACHUTHTECH. Made in India."),
                 StringStruct("OriginalFilename", "Lably.exe"),
                 StringStruct("ProductName", "Lably by ACHUTHTECH"),
-                StringStruct("ProductVersion", "1.2.0.0"),
+                StringStruct("ProductVersion", "1.3.0.0"),
                 StringStruct("Comments", "Developed by ACHUTHTECH"),
             ])
         ]),
