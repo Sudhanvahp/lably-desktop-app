@@ -4,8 +4,8 @@ import os
 from PySide6.QtCore import Qt, QUrl, Signal
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
-    QFileDialog, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit,
-    QMessageBox, QPushButton, QScrollArea, QTextBrowser, QTextEdit,
+    QFileDialog, QFormLayout, QHBoxLayout, QLabel, QLineEdit,
+    QMessageBox, QScrollArea, QTextBrowser, QTextEdit,
     QVBoxLayout, QWidget,
 )
 
@@ -15,7 +15,7 @@ from ..models import LabProfile
 from .. import validators as V
 from ..report_html import CSS, letterhead
 from . import icons
-from .theme import MUTED, S2, S3
+from .theme import S2, S3
 from .widgets import Card, PageHeader, icon_button
 
 IMAGE_FILTER = "Images (*.png *.jpg *.jpeg *.bmp *.gif)"
@@ -90,8 +90,6 @@ class SettingsView(QWidget):
         ("reg_no", "Registration No."),
         ("timings", "Lab Timings"),
         ("holidays", "Holidays"),
-        ("pathologist", "Pathologist / Signatory"),
-        ("pathologist_degrees", "Degrees / Qualification"),
         ("technician", "Lab Technician"),
         ("footer_note", "Footer Note"),
         ("billed_by", "Billed By"),
@@ -113,12 +111,10 @@ class SettingsView(QWidget):
             "reg_no": V.REG_NO_PATTERN,
             "timings": V.TEXT_LINE_PATTERN,
             "holidays": V.TEXT_LINE_PATTERN,
-            "pathologist": V.DOCTOR_PATTERN,
             "technician": V.DOCTOR_PATTERN,
             "lab_name": V.TEXT_LINE_PATTERN,
             "address1": V.TEXT_LINE_PATTERN,
             "address2": V.TEXT_LINE_PATTERN,
-            "pathologist_degrees": V.TEXT_LINE_PATTERN,
             "footer_note": V.TEXT_LINE_PATTERN,
         }
         placeholders = {
@@ -128,9 +124,7 @@ class SettingsView(QWidget):
             "email": "lab@example.com",
             "timings": "Mon-Sat 7:00 AM - 8:00 PM, Sun 7:00 AM - 1:00 PM",
             "holidays": "Sundays and public holidays (optional)",
-            "pathologist": "Dr. A. Rao",
-            "pathologist_degrees": "MD (Pathology)",
-            "technician": "Name printed and signed on the left of every report",
+            "technician": "Name printed and signed at the foot of every report",
         }
         for key, label in self.FIELDS:
             edit = QLineEdit()
@@ -173,13 +167,11 @@ class SettingsView(QWidget):
         form.addRow("Bill Notes:", notes_column)
 
         self.logo = ImagePicker("logo", "Select laboratory logo")
-        self.signature = ImagePicker("signature", "Select pathologist's signature image")
         self.technician_signature = ImagePicker(
             "technician_signature", "Select lab technician's signature image")
-        for picker in (self.logo, self.signature, self.technician_signature):
+        for picker in (self.logo, self.technician_signature):
             picker.changed.connect(self._refresh_preview)
         form.addRow("Logo:", self.logo)
-        form.addRow("Pathologist Signature:", self.signature)
         form.addRow("Technician Signature:", self.technician_signature)
         form.addRow("Backup Folder:", self._build_backup_picker())
 
@@ -426,7 +418,6 @@ class SettingsView(QWidget):
             DEFAULT_BILL_NOTES if first_run and not profile.bill_notes
             else profile.bill_notes)
         self.logo.set_path(profile.logo_path)
-        self.signature.set_path(profile.signature_path)
         self.technician_signature.set_path(profile.technician_signature_path)
         self.backup_edit.setText(profile.backup_dir)
         self._refresh_preview()
@@ -441,7 +432,6 @@ class SettingsView(QWidget):
             setattr(profile, key, V.normalise_phone(getattr(profile, key)))
         profile.bill_notes = self.bill_notes.toPlainText().strip()
         profile.logo_path = self.logo.path
-        profile.signature_path = self.signature.path
         profile.technician_signature_path = self.technician_signature.path
         profile.backup_dir = self.backup_edit.text().strip()
         return profile
@@ -465,14 +455,12 @@ class SettingsView(QWidget):
             storage.check_backup_dir(profile.backup_dir),
             V.check_optional_name(profile.billed_by, "billed-by name"),
             V.check_bill_notes(profile.bill_notes),
-            V.check_optional_name(profile.pathologist, "pathologist's name"),
             V.check_optional_name(profile.technician, "lab technician's name"),
-            V.check_text_line(profile.pathologist_degrees, "Degrees"),
             V.check_text_line(profile.footer_note, "Footer note"),
         )
         if problem:
             self.notify.emit(problem, "warning")
-            for key in ("lab_name", "mobile", "phone", "email", "pathologist"):
+            for key in ("lab_name", "mobile", "phone", "email", "technician"):
                 if key.split("_")[0] in problem.lower() or (
                         key == "lab_name" and "laboratory" in problem.lower()):
                     self.edits[key].setFocus()

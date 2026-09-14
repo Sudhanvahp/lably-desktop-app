@@ -8,7 +8,8 @@ from PySide6.QtWidgets import (
     QVBoxLayout, QWidget,
 )
 
-from .. import printing, storage
+from .. import billing, printing, storage
+from ..bill_html import build as build_bill
 from ..report_html import build
 from ..util import safe_filename
 from . import icons
@@ -144,7 +145,10 @@ class HistoryView(QWidget):
             ("copy", "Duplicate", "Same patient, blank results", self.duplicate_selected, "Danger"),
             ("preview", "Preview", "See it before printing", self.preview_selected, ""),
             ("pdf", "Export PDF", "Save as a PDF file", self.export_selected, ""),
-            ("printer", "Reprint", "Send to the printer again", self.print_selected, ""),
+            ("printer", "Reprint", "Send the report to the printer again",
+             self.print_selected, ""),
+            ("printer", "Reprint Bill", "Send the bill to the printer again",
+             self.print_bill_selected, ""),
             ("open", "Open", "Load it back into the form", self.open_selected, "Primary"),
         ):
             button = icon_button(icon_name, text, tip, kind)
@@ -272,6 +276,9 @@ class HistoryView(QWidget):
     def _html(self, report):
         return build(report, storage.load_profile())
 
+    def _bill_html(self, report):
+        return build_bill(report, storage.load_profile())
+
     # --------------------------------------------------------------- actions
     def open_selected(self):
         report = self._selected_report()
@@ -294,6 +301,28 @@ class HistoryView(QWidget):
             return
         if printing.print_report(self._html(report), self):
             self.notify.emit(f"Report {report.report_no} sent to the printer.", "success")
+
+    def print_bill_selected(self):
+        """Reprint the bill for a stored report, as its own document.
+
+        The report and the bill are separate documents on separate page sizes,
+        so History has to be able to hand over either one. Before they were
+        split, a patient asking for a duplicate receipt got a whole clinical
+        report with a bill block on the end of it.
+        """
+        report = self._selected_report()
+        if not report:
+            return
+        if not billing.has_content(report.billing):
+            self.notify.emit(
+                f"Report {report.report_no} has no bill - nothing was charged "
+                "for it.", "warning")
+            return
+        if printing.print_report(self._bill_html(report), self, "Print Bill",
+                                 printing.BILL_PAGE):
+            self.notify.emit(
+                f"Bill {report.billing.bill_no or report.report_no} sent to "
+                "the printer.", "success")
 
     def export_selected(self):
         report = self._selected_report()

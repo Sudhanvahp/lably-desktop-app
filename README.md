@@ -22,11 +22,12 @@ Or just double-click **run.bat**.
 
 Open the **Laboratory Profile** tab (the app starts there until it's filled in) and enter the
 laboratory name, address, phone, registration number, **lab timings** and the
-**holidays** (free text, optional - e.g. "Sundays & public holidays"), pathologist name
-and degrees, the **lab technician's name**, and pick a logo and the two signature images.
-Three people sign the foot of every report, left to right: the person who raised the bill
-(a blank line to sign by hand, under the *Billed By* name), the lab technician, and the
-pathologist. The letterhead prints centred on the page, with the timings and holidays
+**holidays** (free text, optional - e.g. "Sundays & public holidays"), the **lab
+technician's name**, and pick a logo and the technician's signature image.
+One person signs the foot of the report: the **lab technician** who ran the tests, at
+the bottom left. There is no pathologist field - the profile holds what gets printed
+and nothing that does not. The bill is a separate document and carries its own *Printed By /
+Billed By* line at its foot. The letterhead prints centred on the page, with the timings and holidays
 on their own line under the contact details - change them in the profile and every
 report printed from then on carries the new ones. A live preview shows the letterhead
 exactly as it will print. Chosen images are copied into the app's own `assets` folder, so the report keeps
@@ -43,34 +44,45 @@ working even if you later move or delete the originals.
 2. Tick the panels you need — **CBC, Lipid, LFT, KFT, Blood Sugar, Thyroid**. Ticking a
    panel loads its tests, units and reference ranges; unticking removes them.
 3. Type the results. Anything outside the reference range turns bold red and is marked
-   **H** or **L**, both on screen and on the printout.
+   **H** or **L**, both on screen and on the printout. Every row carries a **Sl No**
+   beside the test name, renumbered as rows are added, deleted or a panel unticked, so
+   a line queried off a printout can be found on the screen by its number. A
+   sub-heading is a band across the grid rather than a line item, so it is not given
+   a number.
 4. Every cell is editable, and **+ Add Row** / **- Delete Row** let you report any test
    that isn't in the built-in panels.
 5. **Billing Details** at the foot of the page prices the work. Every panel you
    ticked appears as one line - a lab bills for "CBC", not for each of its fifteen
    components - and the total, net payable and balance recalculate as you type.
+   Each line carries a **Sl No**, the same numbering the printed bill uses.
    Enter the **Net Deposit** if the patient has paid something; the **Balance** is
    red while anything is owed and green once it is settled. Leave it all blank and
    nothing about the report changes. **Preview Bill / Bill PDF / Print Bill** on that
    card produce the patient's bill as a document of its own.
 6. **Print Preview**, **Export PDF**, or **Save and Print** (which always saves first,
-   so nothing is printed that isn't in the history).
+   so nothing is printed that isn't in the history). The preview has labelled
+   **Zoom In / Zoom Out / Fit Page / Fit Width / 100%** buttons and a live zoom
+   percentage, and answers `Ctrl` with `+`, `-` and `0`.
 
 Reference ranges for Haemoglobin, RBC, PCV, ESR, HDL, Creatinine and Uric Acid are
 sex-specific and re-resolve automatically if you change the patient's sex.
 
 ## Billing
 
-One card, two outputs. The **Billing Details** card sits under the results grid on
-the New Report page and feeds both:
+One card, one output. The **Billing Details** card sits under the results grid on the
+New Report page and feeds the bill:
 
 * **The bill** - a document in its own right, with the lab's letterhead, a numbered
-  services table and the paid amount spelled out in words. Printed at the counter,
-  usually before any result exists. `Preview Bill`, `Bill PDF` and `Print Bill` sit
-  in that card's header, and `Ctrl+B` prints one from anywhere.
-* **The Bill Summary block inside the report** - the same figures, compactly, under
-  the results and after the remarks, before *End of Report*, so it can never sit on
-  top of a laboratory value.
+  services table, the paid amount spelled out in words and a *Printed By / Billed By*
+  line at its foot. Printed at the counter, usually before any result exists.
+  `Preview Bill`, `Bill PDF` and `Print Bill` sit in that card's header, `Ctrl+B`
+  prints one from anywhere, and **Reprint Bill** in History prints a stored one.
+
+**The report carries no charges.** A laboratory report is a clinical record: it gets
+filed with a patient's history and photocopied for a consultant, and what the visit
+cost has no business travelling with it. The two documents also print on different
+paper - A4 portrait for the report, A5 landscape for the bill - so they could never
+honestly have been one sheet.
 
 The bill is laid out in [app/bill_html.py](app/bill_html.py), separately from
 [app/report_html.py](app/report_html.py). Keeping them apart is what stops either
@@ -148,10 +160,12 @@ six-column table a long doctor's name on the right narrows the patient's name on
 the left until it wraps.
 
 The heading is the **bill type**, so a credit bill titles itself *Credit Bill*.
-The **Printed By / Billed By** pair is one stored name printed twice: the app has
-no user accounts, so the person who raised the bill is the person standing at the
-printer, and a second field that could only ever hold the same value would be
-furniture rather than data.
+The **Printed By / Billed By** pair at the foot of the bill is one stored name printed
+twice: the app has no user accounts, so the person who raised the bill is the person
+standing at the printer, and a second field that could only ever hold the same value
+would be furniture rather than data. The pair prints whether or not a name is on file -
+*Billed By* is the line a patient comes back to when they query a charge, so with no
+name the bill prints a rule to sign on rather than dropping the question.
 
 One deviation, deliberate: the lab's slip prints the fourth column header as
 **Net Am** where the word is cut short. This prints **Net Amount**. Everything
@@ -225,10 +239,9 @@ Printing a bill saves the report first, for the same reason `Save and Print` doe
 nothing leaves the counter unrecorded. Preview and PDF do not save. A bill with no
 amounts on it is refused with a message rather than printed blank.
 
-A report with no amounts and no deposit prints no Bill Summary at all - a lab that
-does not use billing should not find a bill block on every report it hands out. The
-bill number is still allocated and stored, because it is the reference the lab
-quotes when a patient asks.
+A report never carries a bill block, priced or not - see **Billing** above. The bill
+number is allocated and stored on every report even when nothing was charged, because
+it is the reference the lab quotes when a patient asks.
 
 ## Interface
 
@@ -421,7 +434,9 @@ ask for confirmation.
 The **Report History** tab lists every saved report. Search by patient name, patient ID, report number or
 referring doctor. For any row you can **Open** it for editing, **Duplicate as New**
 (keeps the patient details, clears the results — the repeat-visit case), **Print
-Preview**, **Reprint**, **Export PDF**, or **Delete**.
+Preview**, **Reprint** (the report), **Reprint Bill** (the bill, on its own A5 page),
+**Export PDF**, or **Delete**. A report that was never charged for says so rather
+than printing a blank bill.
 
 ## Where the data lives
 
@@ -433,7 +448,7 @@ Preview**, **Reprint**, **Export PDF**, or **Delete**.
   security.json           the edit password, salted and hashed - never the password
   index.json              history list (cache; rebuildable)
   reports\<id>.json       one file per report - the source of truth
-  assets\                 logo and signature images
+  assets\                 logo and technician signature images
 ```
 
 Reports are written atomically (`.tmp` then replace), so a crash mid-save can't corrupt
@@ -476,6 +491,24 @@ The report prints A4 portrait; the bill prints A5 landscape, half an A4 sheet.
 Each document's page setup is used for preview, printer and PDF alike, so all
 three produce identical pages. Choosing "Microsoft Print to PDF" in the dialog is a good way
 to test without using paper.
+
+**Print Preview** is the app's own dialog, not Qt's. Qt's `QPrintPreviewDialog`
+draws its zoom controls as icon-only tool buttons from a resource bundle compiled
+into the print-support plugin, and a packaged build routinely loses it - the buttons
+are still there but draw nothing, so the preview looks as though it cannot be zoomed
+at all. `printing.PreviewDialog` builds the same `QPrintPreviewWidget` with buttons
+that carry their own text: **Zoom Out / Zoom In** either side of a live percentage,
+then **Fit Page**, **Fit Width**, **100%** and **Print...**. `Ctrl` with `+`, `-`
+and `0` do the same. Zoom is clamped to 25%-800%, and a control that cannot do
+anything more is disabled rather than clicking dead.
+
+One Windows quirk worth knowing: a print driver can **refuse a whole `QPageLayout`**
+and report it only through a return value. The refusal is silent and total - the
+printer keeps whatever page it had, usually Letter portrait - which is how an A5
+landscape bill ended up printed down the middle of a Letter sheet on machines whose
+default printer does not advertise A5. `printing._configure` reads that return value
+and falls back to setting page size, orientation and margins one at a time, which
+such drivers accept.
 
 ## Layout
 

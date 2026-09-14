@@ -204,9 +204,10 @@ def summary(billing: Billing) -> Dict[str, Decimal]:
 def has_content(billing: Billing) -> bool:
     """True when the bill has something worth printing.
 
-    A lab that does not use billing should not find a Bill Summary block on every
-    report it prints, so an untouched bill - a generated number and date, no
-    amounts, no deposit - renders nothing.
+    An untouched bill - a generated number and date, no amounts, no deposit -
+    is not a bill. Checked before every bill action so a lab that does not use
+    billing is told there is nothing to print, rather than handed a blank slip
+    with a letterhead on it.
     """
     if billing is None:
         return False

@@ -10,11 +10,13 @@ from tests.base import SandboxCase
 
 from PySide6.QtCore import Qt
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QAbstractItemView, QApplication
+from PySide6.QtWidgets import QAbstractItemView, QApplication, QPushButton
 
 from app import validators as V
 from app.models import LabProfile
-from app.ui.report_form import FIELD_HELP
+from app.ui.report_form import (B_AMOUNT, B_SERVICE, B_SL, BILL_COLS,
+                                C_REF, C_RESULT, C_SL, C_TEST, C_UNIT,
+                                COLS, FIELD_HELP)
 from app.ui.theme import DANGER
 
 CBC = "Complete Blood Count (CBC)"
@@ -70,7 +72,7 @@ class UICase(SandboxCase):
         self.form.f_age.setText("34")
         self.form.panel_boxes[panel].setChecked(True)
         if result is not None:
-            self.form.table.item(0, 1).setText(result)
+            self.form.table.item(0, C_RESULT).setText(result)
 
     def last_message(self):
         return self.messages[-1] if self.messages else (None, None)
@@ -112,7 +114,7 @@ class PanelLoadingTests(UICase):
     def test_ticking_a_panel_loads_its_rows(self):
         self.form.panel_boxes[CBC].setChecked(True)
         self.assertGreater(self.form.table.rowCount(), 0)
-        self.assertEqual(self.form.table.item(0, 0).text(), "Haemoglobin (Hb)")
+        self.assertEqual(self.form.table.item(0, C_TEST).text(), "Haemoglobin (Hb)")
 
     def test_unticking_removes_only_that_panel(self):
         self.form.panel_boxes[CBC].setChecked(True)
@@ -122,28 +124,28 @@ class PanelLoadingTests(UICase):
 
         self.assertEqual(self.form.table.rowCount(),
                          self.form.table.rowCount())
-        remaining = {self.form.table.item(r, 0).data(Qt.UserRole)
+        remaining = {self.form.table.item(r, C_TEST).data(Qt.UserRole)
                      for r in range(self.form.table.rowCount())}
         self.assertEqual(remaining, {LIPID})
         self.assertNotEqual(self.form.table.rowCount(), cbc_rows + 0)
 
     def test_changing_sex_updates_sex_specific_ranges(self):
         self.form.panel_boxes[CBC].setChecked(True)
-        self.assertEqual(self.form.table.item(0, 3).text(), "13.0 - 17.0")
+        self.assertEqual(self.form.table.item(0, C_REF).text(), "13.0 - 17.0")
         self.form.f_sex.setCurrentText("F")
-        self.assertEqual(self.form.table.item(0, 3).text(), "12.0 - 15.0")
+        self.assertEqual(self.form.table.item(0, C_REF).text(), "12.0 - 15.0")
 
     def test_out_of_range_result_is_marked_red(self):
         self.form.panel_boxes[CBC].setChecked(True)
-        self.form.table.item(0, 1).setText("9.2")
-        item = self.form.table.item(0, 1)
+        self.form.table.item(0, C_RESULT).setText("9.2")
+        item = self.form.table.item(0, C_RESULT)
         self.assertTrue(item.font().bold())
         self.assertEqual(item.foreground().color().name(), "#c00000")
 
     def test_in_range_result_is_not_marked(self):
         self.form.panel_boxes[CBC].setChecked(True)
-        self.form.table.item(0, 1).setText("14.0")
-        self.assertFalse(self.form.table.item(0, 1).font().bold())
+        self.form.table.item(0, C_RESULT).setText("14.0")
+        self.assertFalse(self.form.table.item(0, C_RESULT).font().bold())
 
     def test_custom_rows_can_be_added_and_deleted(self):
         from app.models import TestRow
@@ -155,7 +157,7 @@ class PanelLoadingTests(UICase):
         self.assertEqual(row.name, "Custom Test")
         self.assertEqual(row.panel, "Investigations")
 
-        self.form.table.setCurrentCell(0, 0)
+        self.form.table.setCurrentCell(0, C_TEST)
         self.form._delete_row()
         self.assertEqual(self.form.table.rowCount(), 0)
 
@@ -173,10 +175,11 @@ class SelectionTests(UICase):
         self.assertEqual(self.form.table.selectionBehavior(),
                          QAbstractItemView.SelectItems)
         self.form.panel_boxes[CBC].setChecked(True)
-        self.form.table.setCurrentCell(1, 1)
+        self.form.table.setCurrentCell(1, C_RESULT)
         selected = self.form.table.selectedIndexes()
         self.assertEqual(len(selected), 1)
-        self.assertEqual((selected[0].row(), selected[0].column()), (1, 1))
+        self.assertEqual((selected[0].row(), selected[0].column()),
+                         (1, C_RESULT))
 
     def test_history_still_selects_whole_rows(self):
         self.assertEqual(self.history.table.selectionBehavior(),
@@ -213,7 +216,7 @@ class PatientIdTests(UICase):
 
         self.assertEqual(self.form.f_pid.text(), report.patient_id)
         self.assertEqual(self.form.current_id, "", "must save as a new report")
-        self.assertTrue(all(self.form.table.item(r, 1).text() == ""
+        self.assertTrue(all(self.form.table.item(r, C_RESULT).text() == ""
                             for r in range(self.form.table.rowCount())),
                         "results must be blank on a duplicate")
 
@@ -306,16 +309,12 @@ class AgeUnitTests(UICase):
 
 class FieldDescriptionTests(UICase):
     def test_every_patient_field_has_a_description(self):
-        from app.ui.report_form import FIELD_HELP
-
         for key, text in FIELD_HELP.items():
             self.assertTrue(text.strip(), f"{key} has no description")
             self.assertTrue(text.strip().endswith("."), f"{key} is not a sentence")
 
     def test_descriptions_are_visible_on_the_page(self):
         from PySide6.QtWidgets import QLabel
-
-        from app.ui.report_form import FIELD_HELP
 
         shown = {w.text() for w in self.form.findChildren(QLabel)
                  if w.objectName() == "FieldHelp"}
@@ -401,14 +400,14 @@ class FieldValidationTests(UICase):
         """Results are not numbers-only - 'Nil' must save."""
         self.fill(result=None)
         self.form.f_age.setText("34")
-        self.form.table.item(0, 1).setText("Nil")
+        self.form.table.item(0, C_RESULT).setText("Nil")
         self.assertTrue(self.form.save())
         saved = self.storage.load_report(self.form.current_id)
         self.assertEqual(saved.rows[0].result, "Nil")
 
     def test_absurdly_long_result_is_blocked(self):
         self.fill()
-        self.form.table.item(0, 1).setText("x" * 60)
+        self.form.table.item(0, C_RESULT).setText("x" * 60)
         self.assertFalse(self.form.save())
         self.assertIn("too long", self.last_message()[0].lower())
 
@@ -698,16 +697,16 @@ class TemplateWorkflowTests(UICase):
         self.form.refresh_panels()
         self.form.panel_boxes[CBC].setChecked(True)
 
-        self.assertEqual(self.form.table.item(0, 3).text(), "14.0 - 18.0")
+        self.assertEqual(self.form.table.item(0, C_REF).text(), "14.0 - 18.0")
         self.assertTrue(self.form.is_heading_row(1))
 
     def test_refresh_keeps_the_operators_typed_results(self):
         self.form.panel_boxes[CBC].setChecked(True)
-        self.form.table.item(0, 1).setText("13.4")
+        self.form.table.item(0, C_RESULT).setText("13.4")
         self.form.refresh_panels()
 
         self.assertTrue(self.form.panel_boxes[CBC].isChecked())
-        self.assertEqual(self.form.table.item(0, 1).text(), "13.4")
+        self.assertEqual(self.form.table.item(0, C_RESULT).text(), "13.4")
 
     def test_headings_are_saved_and_reloaded_with_the_report(self):
         from app import templates
@@ -718,7 +717,7 @@ class TemplateWorkflowTests(UICase):
         self.form.f_name.setText("Jane Doe")
         self.form.f_age.setText("30")
         self.form.panel_boxes["P"].setChecked(True)
-        self.form.table.item(1, 1).setText("1.5")
+        self.form.table.item(1, C_RESULT).setText("1.5")
         self.assertTrue(self.form.save())
 
         stored = self.storage.load_report(self.form.current_id)
@@ -736,7 +735,7 @@ class TemplateWorkflowTests(UICase):
         self.form.f_name.setText("Jane Doe")
         self.form.f_age.setText("30")
         self.form.panel_boxes["P"].setChecked(True)
-        self.form.table.item(1, 1).setText("1.5")
+        self.form.table.item(1, C_RESULT).setText("1.5")
 
         html = build(self.form.collect(), self.storage.load_profile())
         self.assertIn("subhead", html)
@@ -767,7 +766,7 @@ class TemplateWorkflowTests(UICase):
 
         self.assertIn(CBC, self.form.panel_boxes)
         self.form.panel_boxes[CBC].setChecked(True)
-        names = [self.form.table.item(r, 0).text()
+        names = [self.form.table.item(r, C_TEST).text()
                  for r in range(self.form.table.rowCount())]
         self.assertIn("EXTRA SECTION", names)
 
@@ -781,19 +780,19 @@ class GridConstraintTests(UICase):
 
     def test_a_bad_unit_blocks_saving(self):
         self.setup_row()
-        self.form.table.item(0, 2).setText("!!!")
+        self.form.table.item(0, C_UNIT).setText("!!!")
         self.assertFalse(self.form.save())
         self.assertIn("unit", self.last_message()[0].lower())
 
     def test_a_bad_reference_blocks_saving(self):
         self.setup_row()
-        self.form.table.item(0, 3).setText("13 abc")
+        self.form.table.item(0, C_REF).setText("13 abc")
         self.assertFalse(self.form.save())
         self.assertIn("reference", self.last_message()[0].lower())
 
     def test_a_bad_test_name_blocks_saving(self):
         self.setup_row()
-        self.form.table.item(0, 0).setText("<script>")
+        self.form.table.item(0, C_TEST).setText("<script>")
         self.assertFalse(self.form.save())
         self.assertIn("test", self.last_message()[0].lower())
 
@@ -807,15 +806,15 @@ class GridConstraintTests(UICase):
 
     def test_valid_units_and_ranges_save(self):
         self.setup_row()
-        self.form.table.item(0, 2).setText("g/dL")
-        self.form.table.item(0, 3).setText("13.0 - 17.0")
+        self.form.table.item(0, C_UNIT).setText("g/dL")
+        self.form.table.item(0, C_REF).setText("13.0 - 17.0")
         self.assertTrue(self.form.save())
 
     def test_qualitative_ranges_still_save(self):
         self.setup_row()
-        self.form.table.item(0, 2).setText("")
-        self.form.table.item(0, 3).setText("Absent")
-        self.form.table.item(0, 1).setText("Absent")
+        self.form.table.item(0, C_UNIT).setText("")
+        self.form.table.item(0, C_REF).setText("Absent")
+        self.form.table.item(0, C_RESULT).setText("Absent")
         self.assertTrue(self.form.save())
 
     def test_a_bad_cell_is_marked_red(self):
@@ -824,8 +823,8 @@ class GridConstraintTests(UICase):
         from app.ui.theme import DANGER
 
         self.setup_row()
-        self.form.table.item(0, 3).setText("13 abc")
-        item = self.form.table.item(0, 3)
+        self.form.table.item(0, C_REF).setText("13 abc")
+        item = self.form.table.item(0, C_REF)
         self.assertEqual(item.foreground().color().name(), DANGER)
         self.assertTrue(item.font().bold())
         self.assertIn("reference range", item.toolTip())
@@ -833,24 +832,24 @@ class GridConstraintTests(UICase):
     def test_marking_invalid_cells_does_not_wipe_the_flag(self):
         """Regression: the valid-cell reset used to clear the H / L red."""
         self.setup_row()
-        self.form.table.item(0, 1).setText("9.2")        # below 13.0 - 17.0
-        self.form.table.item(0, 2).setText("!!!")        # invalid unit nearby
+        self.form.table.item(0, C_RESULT).setText("9.2")        # below 13.0 - 17.0
+        self.form.table.item(0, C_UNIT).setText("!!!")        # invalid unit nearby
 
-        result = self.form.table.item(0, 1)
+        result = self.form.table.item(0, C_RESULT)
         self.assertEqual(result.foreground().color().name(), "#c00000")
         self.assertTrue(result.font().bold())
 
     def test_an_invalid_result_beats_the_high_low_flag(self):
         self.setup_row()
-        self.form.table.item(0, 1).setText("x" * 60)
-        self.assertIn("too long", self.form.table.item(0, 1).toolTip())
+        self.form.table.item(0, C_RESULT).setText("x" * 60)
+        self.assertIn("too long", self.form.table.item(0, C_RESULT).toolTip())
 
     def test_fixing_a_cell_clears_the_marking(self):
         self.setup_row()
-        self.form.table.item(0, 3).setText("13 abc")
-        self.form.table.item(0, 3).setText("13 - 17")
-        self.assertNotEqual(self.form.table.item(0, 3).toolTip(), "13 abc")
-        self.assertEqual(self.form.table.item(0, 3).toolTip(), "")
+        self.form.table.item(0, C_REF).setText("13 abc")
+        self.form.table.item(0, C_REF).setText("13 - 17")
+        self.assertNotEqual(self.form.table.item(0, C_REF).toolTip(), "13 abc")
+        self.assertEqual(self.form.table.item(0, C_REF).toolTip(), "")
 
     def test_headings_are_exempt(self):
         """A heading has no unit or range, so it must not be validated as one."""
@@ -877,8 +876,6 @@ class DateFieldTests(UICase):
         self.assertLess(delta, 60)
 
     def test_the_saved_date_is_formatted_not_freeform(self):
-        import re
-
         self.fill()
         self.form.save()
         stored = self.storage.load_report(self.form.current_id)
@@ -970,7 +967,7 @@ class ProfileConstraintTests(UICase):
         settings = self.window.settings
         settings.edits["lab_name"].setText("Sunrise Diagnostics")
         settings.edits["address1"].setText("#42, MG Road, Bengaluru 560001")
-        settings.edits["pathologist_degrees"].setText("MD (Pathology)")
+        settings.edits["technician"].setText("S. Kumar")
         settings.save()
         self.assertEqual(self.storage.load_profile().lab_name, "Sunrise Diagnostics")
 
@@ -1301,18 +1298,18 @@ class BillingFormTests(UICase):
 
     def price(self, service, amount):
         for row in range(self.form.bill_table.rowCount()):
-            if self.form.bill_table.item(row, 0).text() == service:
-                self.form.bill_table.item(row, 1).setText(amount)
+            if self.form.bill_table.item(row, B_SERVICE).text() == service:
+                self.form.bill_table.item(row, B_AMOUNT).setText(amount)
                 return
         self.fail(f"{service} is not on the bill")
 
     def services(self):
-        return [self.form.bill_table.item(r, 0).text()
+        return [self.form.bill_table.item(r, B_SERVICE).text()
                 for r in range(self.form.bill_table.rowCount())]
 
     def amounts(self):
-        return {self.form.bill_table.item(r, 0).text():
-                self.form.bill_table.item(r, 1).text()
+        return {self.form.bill_table.item(r, B_SERVICE).text():
+                self.form.bill_table.item(r, B_AMOUNT).text()
                 for r in range(self.form.bill_table.rowCount())}
 
     # AC-01 -----------------------------------------------------------------
@@ -1386,12 +1383,12 @@ class BillingFormTests(UICase):
         self.form._add_blank_row()
         self.assertEqual(self.services(), [CBC])
         last = self.form.table.rowCount() - 1
-        self.form.table.item(last, 0).setText("Dengue NS1")
+        self.form.table.item(last, C_TEST).setText("Dengue NS1")
         self.assertEqual(self.services(), [CBC, "Investigations"])
 
     def test_the_service_name_cannot_be_edited_away_from_the_results(self):
         self.fill()
-        self.assertFalse(self.form.bill_table.item(0, 0).flags() & Qt.ItemIsEditable)
+        self.assertFalse(self.form.bill_table.item(0, B_SERVICE).flags() & Qt.ItemIsEditable)
 
     # AC-04 / AC-05 / AC-06 / AC-07 -----------------------------------------
     def test_totals_update_as_amounts_are_typed(self):
@@ -1428,7 +1425,7 @@ class BillingFormTests(UICase):
     def test_an_unusable_amount_is_marked_and_left_out_of_the_total(self):
         self.fill()
         self.price(CBC, "abc")
-        cell = self.form.bill_table.item(0, 1)
+        cell = self.form.bill_table.item(0, B_AMOUNT)
         self.assertEqual(cell.foreground().color().name().lower(), DANGER.lower())
         self.assertTrue(cell.toolTip())
         self.assertEqual(self.form.l_total.text(), "0.00")
@@ -1537,15 +1534,20 @@ class BillingFormTests(UICase):
         self.assertEqual(self.form.f_deposit.text(), "")
 
     # AC-08 / AC-09 ---------------------------------------------------------
-    def test_the_bill_reaches_the_printable_output(self):
+    def test_the_bill_reaches_the_printable_bill_and_not_the_report(self):
+        """The two documents are separate: the charges print on the bill only."""
         self.fill()
         self.price(CBC, "400")
         self.form.f_deposit.setText("250")
-        html = self.form._html()
-        self.assertIn("BILL SUMMARY", html)
-        self.assertIn("400.00", html)
-        self.assertIn("250.00", html)
-        self.assertIn("150.00", html)
+
+        bill = self.form._bill_html()
+        for figure in ("400.00", "250.00", "150.00"):
+            self.assertIn(figure, bill)
+
+        report = self.form._html()
+        self.assertNotIn("BILL SUMMARY", report)
+        for figure in ("400.00", "250.00", "150.00"):
+            self.assertNotIn(figure, report)
 
     def test_preview_print_and_pdf_all_render_the_same_bill(self):
         """One html builder feeds all three paths, so this asserts the property
@@ -1642,7 +1644,7 @@ class PatientPhoneTests(UICase):
     def test_it_reaches_the_bill(self):
         self.fill()
         self.form.f_phone.setText("9620055441")
-        self.form.bill_table.item(0, 1).setText("400")
+        self.form.bill_table.item(0, B_AMOUNT).setText("400")
         self.assertIn("9620055441", self.form._bill_html())
 
 
@@ -1652,7 +1654,7 @@ class BillDocumentTests(UICase):
 
     def billed(self, amount="400", deposit=""):
         self.fill()
-        self.form.bill_table.item(0, 1).setText(amount)
+        self.form.bill_table.item(0, B_AMOUNT).setText(amount)
         if deposit:
             self.form.f_deposit.setText(deposit)
 
@@ -1752,11 +1754,11 @@ class BillDocumentTests(UICase):
         with open(path, "rb") as fh:
             self.assertTrue(fh.read(4).startswith(b"%PDF"))
 
-    def test_the_report_still_prints_its_own_summary_block(self):
-        """The two documents coexist; adding the bill did not remove the block
-        the change request asked for inside the report."""
+    def test_the_report_carries_no_bill_block_of_its_own(self):
+        """The bill is its own document. A charge must not ride along on a
+        clinical record that gets filed and photocopied."""
         self.billed(deposit="150")
-        self.assertIn("BILL SUMMARY", self.form._html())
+        self.assertNotIn("BILL SUMMARY", self.form._html())
 
 
 class BillFieldTests(UICase):
@@ -1764,7 +1766,7 @@ class BillFieldTests(UICase):
 
     def billed(self):
         self.fill()
-        self.form.bill_table.item(0, 1).setText("400")
+        self.form.bill_table.item(0, B_AMOUNT).setText("400")
         self.form.f_deposit.setText("400")
 
     def test_a_new_bill_starts_as_a_cash_bill(self):
@@ -1970,9 +1972,27 @@ class BillPageSizeTests(UICase):
         self.assertAlmostEqual(sizes["bill"][0], sizes["report"][0], delta=2)
         self.assertAlmostEqual(sizes["bill"][1], sizes["report"][1] / 2, delta=3)
 
+    def test_a_driver_that_refuses_the_whole_layout_still_gets_the_page(self):
+        """Regression: a Windows driver can reject a QPageLayout outright and
+        keep whatever page it had - usually Letter portrait - which is how an A5
+        bill came out down the middle of a Letter sheet. The fallback sets size,
+        orientation and margins one at a time, which such drivers accept."""
+        from PySide6.QtGui import QPageLayout, QPageSize
+        from PySide6.QtPrintSupport import QPrinter
+
+        from app import printing
+
+        printer = QPrinter(QPrinter.HighResolution)
+        printer.setPageLayout = lambda layout: False      # a driver saying no
+        printing._configure(printer, printing.BILL_PAGE)
+
+        self.assertEqual(printer.pageLayout().pageSize().id(), QPageSize.A5)
+        self.assertEqual(printer.pageLayout().orientation(),
+                         QPageLayout.Landscape)
+
     def billed(self):
         self.fill()
-        self.form.bill_table.item(0, 1).setText("400")
+        self.form.bill_table.item(0, B_AMOUNT).setText("400")
         self.form.f_deposit.setText("400")
 
     def test_previewing_a_bill_asks_for_the_bill_page(self):
@@ -2236,3 +2256,293 @@ class DrivePromptTests(UICase):
         self._fill_and_save()
         self.assertEqual(self.storage.load_profile().backup_dir, "")
         self.assertEqual(self.messages[-2][1], "warning")
+
+
+class SerialNumberTests(UICase):
+    """Both grids carry a Sl No column, because both are read against paper."""
+
+    def serials(self):
+        return [self.form.table.item(r, C_SL).text()
+                for r in range(self.form.table.rowCount())]
+
+    def bill_serials(self):
+        return [self.form.bill_table.item(r, B_SL).text()
+                for r in range(self.form.bill_table.rowCount())]
+
+    def test_the_results_grid_leads_with_a_serial_column(self):
+        self.assertEqual(COLS[C_SL], "Sl No")
+        self.assertEqual(
+            self.form.table.horizontalHeaderItem(C_SL).text(), "Sl No")
+        self.assertEqual(self.form.table.columnCount(), len(COLS))
+
+    def test_the_bill_grid_leads_with_a_serial_column(self):
+        self.assertEqual(BILL_COLS[B_SL], "Sl No")
+        self.assertEqual(
+            self.form.bill_table.horizontalHeaderItem(B_SL).text(), "Sl No")
+        self.assertEqual(self.form.bill_table.columnCount(), len(BILL_COLS))
+
+    def test_the_serial_column_is_beside_the_test_name(self):
+        """Beside, not somewhere off to the right - it is read with the name."""
+        self.assertEqual(C_SL, C_TEST - 1)
+        self.assertEqual(B_SL, B_SERVICE - 1)
+
+    def test_rows_are_numbered_from_one_as_a_panel_loads(self):
+        self.form.panel_boxes[CBC].setChecked(True)
+        tests = [r for r in range(self.form.table.rowCount())
+                 if not self.form.is_heading_row(r)]
+        self.assertGreater(len(tests), 1)
+        self.assertEqual([self.form.table.item(r, C_SL).text() for r in tests],
+                         [str(i) for i in range(1, len(tests) + 1)])
+
+    def test_a_sub_heading_is_not_given_a_number(self):
+        """It is a band across the sheet, not a line item. Numbering it would
+        put the screen's serials out of step with the printed report."""
+        from app.models import TestRow
+
+        for row in (TestRow("Sectioned", "SECTION ONE", kind="heading"),
+                    TestRow("Sectioned", "Alpha", "1.5", "g/dL", "1 - 2"),
+                    TestRow("Sectioned", "Beta", "1.5", "g/dL", "1 - 2")):
+            self.form._append_row(row)
+        self.assertEqual(self.serials(), ["", "1", "2"])
+
+    def test_deleting_a_row_renumbers_the_rest(self):
+        """A serial left over from before a deletion is worse than none."""
+        self.form.panel_boxes[CBC].setChecked(True)
+        before = len([r for r in range(self.form.table.rowCount())
+                      if not self.form.is_heading_row(r)])
+        self.form.table.setCurrentCell(0, C_TEST)
+        self.form._delete_row()
+        after = [self.form.table.item(r, C_SL).text()
+                 for r in range(self.form.table.rowCount())
+                 if not self.form.is_heading_row(r)]
+        self.assertEqual(after, [str(i) for i in range(1, before)])
+
+    def test_adding_a_row_numbers_it_next(self):
+        self.form.panel_boxes[CBC].setChecked(True)
+        numbered = [x for x in self.serials() if x]
+        self.form._add_blank_row()
+        self.assertEqual(self.form.table.item(
+            self.form.table.rowCount() - 1, C_SL).text(),
+            str(len(numbered) + 1))
+
+    def test_unticking_a_panel_renumbers_what_is_left(self):
+        self.form.panel_boxes[CBC].setChecked(True)
+        self.form._panel_toggled(CBC, True)
+        self.form.panel_boxes[LIPID].setChecked(True)
+        self.form._panel_toggled(LIPID, True)
+        self.form.panel_boxes[CBC].setChecked(False)
+        self.form._panel_toggled(CBC, False)
+        numbered = [x for x in self.serials() if x]
+        self.assertEqual(numbered, [str(i) for i in range(1, len(numbered) + 1)])
+
+    def test_bill_lines_are_numbered_from_one(self):
+        self.fill()
+        self.form.panel_boxes[LIPID].setChecked(True)
+        self.assertEqual(self.bill_serials(),
+                         [str(i) for i in
+                          range(1, self.form.bill_table.rowCount() + 1)])
+
+    def test_a_serial_cannot_be_typed_into(self):
+        """It is generated. An editable serial could only ever disagree with
+        the row it is numbering."""
+        self.form.panel_boxes[CBC].setChecked(True)
+        self.assertFalse(
+            self.form.table.item(0, C_SL).flags() & Qt.ItemIsEditable)
+        self.assertFalse(
+            self.form.table.item(0, C_SL).flags() & Qt.ItemIsSelectable)
+        self.fill()
+        self.assertFalse(
+            self.form.bill_table.item(0, B_SL).flags() & Qt.ItemIsEditable)
+
+    def test_the_serial_column_does_not_reach_the_saved_report(self):
+        """It is furniture on the screen, not data. The stored row must be the
+        same shape it always was."""
+        self.fill()
+        self.form.save()
+        stored = self.storage.load_report(self.form.current_id)
+        self.assertEqual(stored.rows[0].name, "Haemoglobin (Hb)")
+        self.assertEqual(stored.rows[0].result, "14.0")
+        self.assertEqual(stored.rows[0].unit, "g/dL")
+
+    def test_a_saved_report_reopens_with_its_serials(self):
+        self.fill()
+        self.form.save()
+        report = self.storage.load_report(self.form.current_id)
+        self.form.new_report()
+        self.form.load_report(report)
+        numbered = [x for x in self.serials() if x]
+        self.assertEqual(numbered, [str(i) for i in range(1, len(numbered) + 1)])
+        self.assertEqual(self.bill_serials(),
+                         [str(i) for i in
+                          range(1, self.form.bill_table.rowCount() + 1)])
+
+
+class PreviewZoomTests(UICase):
+    """The preview has to offer zoom controls the operator can actually see.
+
+    Qt's own preview dialog draws its zoom buttons from a resource bundle that
+    a packaged build routinely loses, which is why they went missing.
+    """
+
+    def preview(self, page=None):
+        from app import printing
+
+        dialog = printing.PreviewDialog(
+            self.form._html(), self.window, "Print Preview",
+            page or printing.REPORT_PAGE)
+        self.addCleanup(dialog.deleteLater)
+        return dialog
+
+    def test_the_zoom_buttons_carry_their_own_text(self):
+        dialog = self.preview()
+        self.assertIn("Zoom In", dialog.zoom_in_button.text())
+        self.assertIn("Zoom Out", dialog.zoom_out_button.text())
+
+    def test_zooming_in_and_out_changes_the_zoom(self):
+        dialog = self.preview()
+        dialog.zoom_reset()
+        dialog.zoom_in()
+        self.assertGreater(dialog.view.zoomFactor(), 1.0)
+        dialog.zoom_reset()
+        dialog.zoom_out()
+        self.assertLess(dialog.view.zoomFactor(), 1.0)
+
+    def test_the_current_zoom_is_shown_as_a_percentage(self):
+        dialog = self.preview()
+        dialog.zoom_reset()
+        self.assertEqual(dialog.zoom_label.text(), "100%")
+        dialog.zoom_in()
+        self.assertEqual(dialog.zoom_label.text(), "125%")
+
+    def test_zoom_is_clamped_at_both_ends(self):
+        """A held-down key must not zoom to a blank page either way."""
+        from app import printing
+
+        dialog = self.preview()
+        for _ in range(60):
+            dialog.zoom_in()
+        self.assertEqual(dialog.view.zoomFactor(), printing.ZOOM_MAX)
+        self.assertFalse(dialog.zoom_in_button.isEnabled())
+        for _ in range(80):
+            dialog.zoom_out()
+        self.assertEqual(dialog.view.zoomFactor(), printing.ZOOM_MIN)
+        self.assertFalse(dialog.zoom_out_button.isEnabled())
+
+    def test_fit_page_and_fit_width_are_offered(self):
+        dialog = self.preview()
+        labels = {b.text() for b in dialog.findChildren(QPushButton)}
+        self.assertIn("Fit Page", labels)
+        self.assertIn("Fit Width", labels)
+        self.assertIn("100%", labels)
+        dialog.fit_width()
+        dialog.fit_page()
+
+    def test_the_preview_shows_the_document_it_was_given(self):
+        self.fill()
+        dialog = self.preview()
+        self.assertIn("Haemoglobin (Hb)", dialog._html)
+
+    def test_the_bill_preview_uses_the_bill_page_setup(self):
+        from app import printing
+
+        dialog = self.preview(printing.BILL_PAGE)
+        self.assertIsNotNone(dialog.printer)
+
+
+class HistoryBillReprintTests(UICase):
+    """A stored bill has to be reprintable on its own.
+
+    Before the two documents were split, asking History to reprint handed the
+    patient a whole clinical report with a bill block on the end of it.
+    """
+
+    def billed_report(self, amount="400"):
+        self.fill()
+        self.form.bill_table.item(0, B_AMOUNT).setText(amount)
+        self.form.save()
+        self.history.reload()
+        self.history.table.selectRow(0)
+
+    def test_reprinting_the_bill_sends_the_bill_on_the_bill_page(self):
+        from app import printing
+
+        printed = []
+        self.stub_print(printed)
+        self.billed_report()
+        self.history.print_bill_selected()
+
+        html, title, page = printed[-1]
+        self.assertEqual(title, "Print Bill")
+        self.assertEqual(page, printing.BILL_PAGE)
+        self.assertIn("Billed By", html)
+        self.assertIn("400.00", html)
+
+    def test_reprinting_the_report_sends_the_report_without_the_bill(self):
+        printed = []
+        self.stub_print(printed)
+        self.billed_report()
+        self.history.print_selected()
+
+        html = printed[-1][0]
+        self.assertIn("LABORATORY TEST REPORT", html)
+        self.assertNotIn("BILL SUMMARY", html)
+        self.assertNotIn("400.00", html)
+
+    def test_a_report_that_was_never_charged_for_says_so(self):
+        self.fill()
+        self.form.save()
+        self.history.reload()
+        self.history.table.selectRow(0)
+        printed = []
+        self.stub_print(printed)
+        self.history.print_bill_selected()
+        self.assertEqual(printed, [])
+        self.assertEqual(self.last_message()[1], "warning")
+        self.assertIn("no bill", self.last_message()[0])
+
+
+class BilledByOnTheBillTests(UICase):
+    """The bill names who to come back to about it."""
+
+    def bill_html(self, billed_by):
+        self.fill()
+        self.form.bill_table.item(0, B_AMOUNT).setText("400")
+        self.form.f_billed_by.setText(billed_by)
+        return self.form._bill_html()
+
+    def test_the_name_prints_under_billed_by(self):
+        html = self.bill_html("Nethra H M")
+        self.assertIn("Billed By", html)
+        self.assertIn("Nethra H M", html)
+        # Name above the label, the way the lab's own slip sets it.
+        self.assertLess(html.index("Nethra H M"), html.index("Billed By"))
+
+    def test_billed_by_is_at_the_foot_of_the_bill(self):
+        html = self.bill_html("Nethra H M")
+        self.assertLess(html.index("Total Billed"), html.index("Billed By"))
+
+    def test_the_label_prints_even_with_nobody_named(self):
+        html = self.bill_html("")
+        self.assertIn("Billed By", html)
+
+
+class ProfileFieldTests(UICase):
+    """The profile holds what gets printed, and nothing that does not."""
+
+    def test_the_pathologist_fields_are_gone_from_the_form(self):
+        """They printed nowhere once the technician became the report's only
+        signatory, so they were inputs that went nowhere."""
+        for key in ("pathologist", "pathologist_degrees"):
+            self.assertNotIn(key, self.window.settings.edits)
+        self.assertFalse(hasattr(self.window.settings, "signature"))
+
+    def test_the_technician_signature_picker_is_still_there(self):
+        """The one signature the report does print."""
+        self.assertTrue(hasattr(self.window.settings, "technician_signature"))
+
+    def test_every_profile_field_on_the_form_reaches_the_stored_profile(self):
+        """No field on this page may be decoration."""
+        from app.models import LabProfile
+
+        for key, _ in self.window.settings.FIELDS:
+            self.assertTrue(hasattr(LabProfile(), key), key)

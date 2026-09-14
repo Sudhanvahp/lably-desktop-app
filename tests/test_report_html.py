@@ -27,8 +27,8 @@ def sample_report(**kwargs):
 
 def sample_profile(**kwargs):
     fields = dict(lab_name="Sunrise Diagnostics", address1="MG Road",
-                  phone="080-1234", pathologist="Dr. A. Rao",
-                  pathologist_degrees="MD", reg_no="KA/1", footer_note="Computer generated")
+                  phone="080-1234", technician="S. Kumar",
+                  reg_no="KA/1", footer_note="Computer generated")
     fields.update(kwargs)
     return LabProfile(**fields)
 
@@ -44,7 +44,7 @@ class ContentTests(unittest.TestCase):
 
     def test_lab_details_are_present(self):
         for expected in ("Sunrise Diagnostics", "MG Road", "080-1234",
-                         "Dr. A. Rao", "KA/1", "Computer generated"):
+                         "KA/1", "Computer generated"):
             self.assertIn(expected, self.html)
 
     def test_every_result_row_appears(self):
@@ -94,104 +94,49 @@ def sample_bill(**kwargs):
     return Billing(**fields)
 
 
-class BillSummaryTests(unittest.TestCase):
-    """The bill is printed on the same sheet as the results, so it has to be
-    unmistakably its own section and it has to add up in front of the patient."""
+class NoBillOnTheReportTests(unittest.TestCase):
+    """The report is the clinical document and carries no charges.
+
+    The bill is a separate document with its own page size, rendered by
+    `bill_html`. A report is filed with a patient's history and photocopied for
+    a consultant, and what the visit cost has no business travelling with it.
+    """
 
     def setUp(self):
         self.html = build(sample_report(billing=sample_bill()), sample_profile())
 
-    def test_the_section_is_clearly_identified(self):
-        self.assertIn("BILL SUMMARY", self.html)
+    def test_there_is_no_bill_section(self):
+        self.assertNotIn("BILL SUMMARY", self.html)
 
-    def test_the_bill_number_and_date_are_printed(self):
-        self.assertIn("BILL-000001", self.html)
-        self.assertIn("01-Jan-2026 09.15.00 AM", self.html)
+    def test_no_amount_from_the_bill_is_printed(self):
+        for figure in ("400.00", "600.00", "1,000.00", "250.00", "750.00"):
+            self.assertNotIn(figure, self.html)
 
-    def test_the_date_reads_the_same_here_as_on_the_standalone_bill(self):
-        """One bill quoted by two documents. They must not disagree about when it
-        was raised, nor write the same instant two different ways."""
+    def test_none_of_the_bill_totals_are_named(self):
+        for label in ("Total Billed", "Net Payable", "Net Deposit", "BALANCE"):
+            self.assertNotIn(label, self.html)
+
+    def test_the_bill_number_is_not_printed(self):
+        self.assertNotIn("BILL-000001", self.html)
+
+    def test_the_currency_column_is_not_printed(self):
+        self.assertNotIn(f"AMOUNT ({CURRENCY})", self.html)
+
+    def test_the_results_still_are(self):
+        """Removing the bill must not have taken anything else with it."""
+        self.assertIn("Haemoglobin (Hb)", self.html)
+        self.assertIn("End of Report", self.html)
+
+    def test_the_standalone_bill_still_carries_all_of_it(self):
+        """What left the report has to exist somewhere, or this is data loss
+        rather than a separation of documents."""
         from app.bill_html import build as build_bill
 
-        report = sample_report(billing=sample_bill())
-        for html in (self.html, build_bill(report, sample_profile())):
-            self.assertIn("01-Jan-2026 09.15.00 AM", html)
-            self.assertNotIn("01-01-2026 09:15:00 AM", html)
-
-    def test_every_billed_service_is_listed_with_its_amount(self):
-        for expected in ("Complete Blood Count (CBC)", "400.00",
-                         "Lipid Profile", "600.00"):
-            self.assertIn(expected, self.html)
-
-    def test_the_totals_are_all_present(self):
-        for label in ("Total Billed", "Net Payable", "Net Deposit", "BALANCE"):
-            self.assertIn(label, self.html)
-
-    def test_the_arithmetic_is_printed_correctly(self):
-        self.assertIn("1,000.00", self.html)   # total billed and net payable
-        self.assertIn("250.00", self.html)     # deposit
-        self.assertIn("750.00", self.html)     # balance
-
-    def test_the_currency_is_named_on_the_amount_column(self):
-        self.assertIn(f"AMOUNT ({CURRENCY})", self.html)
-
-    def test_the_bill_comes_after_the_results_and_before_the_end_marker(self):
-        """Section 6: the bill must not overlap or hide laboratory results."""
-        self.assertLess(self.html.index("Haemoglobin (Hb)"),
-                        self.html.index("BILL SUMMARY"))
-        self.assertLess(self.html.index("BILL SUMMARY"),
-                        self.html.index("End of Report"))
-
-    def test_the_bill_comes_after_the_remarks(self):
-        html = build(sample_report(billing=sample_bill(),
-                                   remarks="Repeat after 2 weeks"), sample_profile())
-        self.assertLess(html.index("Repeat after 2 weeks"), html.index("BILL SUMMARY"))
-
-    def test_a_settled_bill_prints_a_zero_balance_rather_than_nothing(self):
-        html = build(sample_report(billing=sample_bill(net_deposit="1000")),
-                     sample_profile())
-        self.assertIn("BALANCE", html)
-        self.assertIn("0.00", html)
-
-    def test_an_unpriced_service_prints_a_dash_not_a_zero_charge(self):
-        html = build(sample_report(billing=sample_bill(
-            items=[BillItem("Complete Blood Count (CBC)", "400"),
-                   BillItem("Lipid Profile", "")])), sample_profile())
-        self.assertIn("&ndash;", html)
-
-    def test_amounts_are_always_two_decimal_places(self):
-        html = build(sample_report(billing=sample_bill(
-            items=[BillItem("CBC", "400.5")], net_deposit="")), sample_profile())
-        self.assertIn("400.50", html)
-
-    def test_a_report_with_no_billing_prints_no_bill_section(self):
-        self.assertNotIn("BILL SUMMARY", build(sample_report(), sample_profile()))
-
-    def test_a_bill_number_alone_is_not_a_bill(self):
-        """A lab that never enters an amount should not find a bill block on
-        every report it prints."""
-        html = build(sample_report(billing=Billing(
-            bill_no="BILL-000001", bill_date="01-01-2026",
-            items=[BillItem("Complete Blood Count (CBC)", "")])), sample_profile())
-        self.assertNotIn("BILL SUMMARY", html)
-
-    def test_an_unreadable_amount_is_not_smuggled_into_the_total(self):
-        html = build(sample_report(billing=sample_bill(
-            items=[BillItem("CBC", "400"), BillItem("Lipid Profile", "nonsense")],
-            net_deposit="")), sample_profile())
-        self.assertIn("BILL SUMMARY", html)
-        self.assertNotIn("nonsense", html)
-
-    def test_service_names_are_escaped(self):
-        html = build(sample_report(billing=sample_bill(
-            items=[BillItem("<script>alert(1)</script>", "400")])), sample_profile())
-        self.assertNotIn("<script>", html)
-        self.assertIn("&lt;script&gt;", html)
-
-    def test_the_bill_number_is_escaped(self):
-        html = build(sample_report(billing=sample_bill(bill_no="A & B")),
-                     sample_profile())
-        self.assertIn("A &amp; B", html)
+        bill = build_bill(sample_report(billing=sample_bill()), sample_profile())
+        for expected in ("BILL-000001", "01-Jan-2026 09.15.00 AM",
+                         "Complete Blood Count (CBC)", "400.00",
+                         "Lipid Profile", "600.00", "1,000.00", "750.00"):
+            self.assertIn(expected, bill)
 
 
 class EscapingTests(unittest.TestCase):
@@ -228,7 +173,7 @@ class RobustnessTests(unittest.TestCase):
     def test_missing_image_files_are_skipped_silently(self):
         html = build(sample_report(),
                      sample_profile(logo_path="C:/nope/missing.png",
-                                    signature_path="C:/nope/sig.png"))
+                                    technician_signature_path="C:/nope/sig.png"))
         self.assertIn("Sunrise Diagnostics", html)
         self.assertNotIn("missing.png", html)
 
@@ -298,38 +243,43 @@ class EmphasisTests(unittest.TestCase):
 
 
 class SignatoryTests(unittest.TestCase):
-    def test_technician_signs_on_the_left_and_pathologist_on_the_right(self):
+    """One signatory on the report: the technician who ran the tests."""
+
+    def report_html(self):
+        return build(sample_report(), sample_profile(technician="S. Kumar"))
+
+    def test_the_technician_signs_at_the_bottom_left(self):
         html = build(sample_report(), sample_profile(technician="S. Kumar"))
-        tech = html.index("S. Kumar")
-        path = html.index("Dr. A. Rao")
-        self.assertLess(tech, path)
+        self.assertIn("S. Kumar", html)
         self.assertIn("Lab Technician", html)
-        self.assertIn("Verified &amp; Authorised Signatory", html)
+        # Left of the page, and after the results rather than above them.
+        self.assertLess(html.index("End of Report"), html.index("S. Kumar"))
+        block = html[html.index("End of Report"):]
+        self.assertIn('align="left"', block)
 
-    def test_no_technician_leaves_the_middle_slot_empty(self):
-        html = build(sample_report(), sample_profile())
-        self.assertNotIn("Lab Technician", html)
-        self.assertIn("Dr. A. Rao", html)
+    def test_the_pathologist_is_not_printed(self):
+        """They were dropped from the lab profile too, so there is nothing left
+        to print - this holds the door shut."""
+        self.assertNotIn("Authorised Signatory", self.report_html())
+        self.assertFalse(hasattr(LabProfile(), "pathologist"))
+        self.assertFalse(hasattr(LabProfile(), "pathologist_degrees"))
 
-    def test_the_billed_by_person_signs_on_the_far_left(self):
+    def test_the_billing_clerk_is_not_printed(self):
+        """They sign the bill. The report is not an accounting document."""
         report = sample_report(billing=Billing(billed_by="Miss. Nethra"))
-        html = build(report, sample_profile(technician="S. Kumar"))
-        self.assertLess(html.index("Miss. Nethra"), html.index("S. Kumar"))
-        self.assertLess(html.index("S. Kumar"), html.index("Dr. A. Rao"))
-        self.assertIn("Billed By", html)
-
-    def test_the_billed_by_slot_falls_back_to_the_profile_default(self):
-        html = build(sample_report(), sample_profile(billed_by="Miss. Nethra"))
-        self.assertIn("Miss. Nethra", html)
-        self.assertIn("Billed By", html)
-
-    def test_nobody_billing_leaves_that_slot_empty(self):
-        html = build(sample_report(), sample_profile())
+        html = build(report, sample_profile(billed_by="Miss. Nethra",
+                                            technician="S. Kumar"))
+        self.assertNotIn("Miss. Nethra", html)
         self.assertNotIn("Billed By", html)
+
+    def test_no_technician_means_no_signature_block(self):
+        html = build(sample_report(), sample_profile(technician=""))
+        self.assertNotIn("Lab Technician", html)
 
     def test_technician_name_is_escaped(self):
         html = build(sample_report(), sample_profile(technician="<i>x</i>"))
         self.assertNotIn("<i>x</i>", html)
+        self.assertIn("&lt;i&gt;x&lt;/i&gt;", html)
 
 
 class LabelEmphasisTests(unittest.TestCase):

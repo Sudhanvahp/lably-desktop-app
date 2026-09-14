@@ -295,12 +295,31 @@ class DeletionTests(SandboxCase):
 class ProfileTests(SandboxCase):
     def test_profile_round_trips(self):
         profile = LabProfile(lab_name="Sunrise", address1="MG Road", phone="080",
-                             pathologist="Dr. Rao", footer_note="note")
+                             technician="S. Kumar", footer_note="note")
         self.storage.save_profile(profile)
         self.storage.clear_cache()
         loaded = self.storage.load_profile()
         self.assertEqual(loaded.lab_name, "Sunrise")
+        self.assertEqual(loaded.technician, "S. Kumar")
         self.assertEqual(loaded.footer_note, "note")
+
+    def test_a_profile_saved_by_an_older_build_still_loads(self):
+        """Profiles written before the pathologist was dropped carry keys the
+        model no longer has. They must load, minus those keys, not throw."""
+        import json
+        import os
+
+        path = os.path.join(self.storage.app_dir(), "lab_profile.json")
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump({"lab_name": "Sunrise", "technician": "S. Kumar",
+                       "pathologist": "Dr. Rao",
+                       "pathologist_degrees": "MD (Pathology)",
+                       "signature_path": "C:/old/sig.png"}, fh)
+        self.storage.clear_cache()
+        loaded = self.storage.load_profile()
+        self.assertEqual(loaded.lab_name, "Sunrise")
+        self.assertEqual(loaded.technician, "S. Kumar")
+        self.assertFalse(hasattr(loaded, "pathologist"))
 
     def test_missing_profile_is_empty_not_an_error(self):
         self.assertEqual(self.storage.load_profile().lab_name, "")

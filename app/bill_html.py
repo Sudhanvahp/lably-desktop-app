@@ -256,17 +256,34 @@ def _amount_words(r: Report) -> str:
     )
 
 
+def _signline(width: int = 120) -> str:
+    """Somewhere to sign when no name is on file.
+
+    A filled one-pixel cell rather than a border, for the same reason as
+    `_hrule`, and left-aligned so it sits under the label it belongs to."""
+    return (
+        f'<table width="{width}" cellspacing="0" cellpadding="0" align="left">'
+        f'<tr><td bgcolor="{INK}" height="1" '
+        'style="font-size:1px; line-height:1px;">&nbsp;</td></tr></table>'
+    )
+
+
 def _signatories(r: Report) -> str:
-    """Name above, role beneath - the way the slip sets them.
+    """Printed By on the left, Billed By on the right - the way the slip sets
+    them, name above role.
 
     One stored name fills both slots. The app has no user accounts, so the person
     who raised the bill is the person standing at the printer; inventing a second
     field that can only ever hold the same value would be furniture, not data.
+
+    Printed whether or not that name is on file. Billed By is the line a patient
+    comes back to when they query the charge, so the bill has to put the question
+    on the paper even when the app cannot answer it: a blank rule is somewhere to
+    sign, and no block at all is a bill that nobody stands behind.
     """
     name = escape(r.billing.billed_by)
-    if not name:
-        return ""
-    cell = f'<div class="signname">{name}</div><div class="signrole">%s</div>'
+    above = f'<div class="signname">{name}</div>' if name else _signline()
+    cell = above + '<div class="signrole">%s</div>'
     return _plain(
         "<tr>"
         f'<td width="62%" class="td">{cell % "Printed By"}</td>'
@@ -354,9 +371,8 @@ def build(report: Report, lab: LabProfile) -> str:
         _band(_closing(report), top=3),
     ]
 
-    signatories = _signatories(report)
-    if signatories:
-        bands.append(_band(signatories, top=6))
+    # Always, not only when a name is on file - see `_signatories`.
+    bands.append(_band(_signatories(report), top=6))
 
     notes = _notes(lab)
     if notes:

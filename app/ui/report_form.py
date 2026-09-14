@@ -1,21 +1,19 @@
 """New / edit report screen: patient details, panel selection, editable results grid."""
 import os
-from datetime import datetime
 
 from PySide6.QtCore import QDate, QDateTime, Qt, Signal
 from PySide6.QtGui import QBrush, QColor, QFont
 from PySide6.QtWidgets import (
-    QAbstractItemView, QCheckBox, QComboBox, QDateEdit, QDateTimeEdit,
+    QAbstractItemView, QCheckBox, QComboBox, QDateTimeEdit,
     QFileDialog, QFormLayout, QFrame,
     QGridLayout, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMessageBox,
-    QPushButton, QScrollArea, QTableWidget, QTableWidgetItem, QVBoxLayout,
-    QWidget,
+    QScrollArea, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
 from .. import billing, printing, storage
 from .drive_prompt import apply_answer, ask_for_drive
 from . import icons
-from .theme import ACCENT, ACCENT_DARK, DANGER, MUTED, S2, S3, SURFACE_ALT
+from .theme import ACCENT_DARK, DANGER, MUTED, S2, S3, SURFACE_ALT
 from . import theme as T
 from .widgets import AmountDelegate, Card, PageHeader, hrule, icon_button
 from ..models import BillItem, Billing, Report, TestRow
@@ -26,8 +24,21 @@ from ..bill_html import build as build_bill
 from ..util import safe_filename
 from .. import validators as V
 
-COLS = ["Test", "Result", "Unit", "Reference Range"]
-BILL_COLS = ["Service / Test", f"Amount ({billing.CURRENCY})"]
+# Both grids lead with a serial number, because both are checked against paper.
+# The printed bill has always numbered its services, and an operator reading a
+# result back off a printout needs the same handle on the screen: "line 7" has
+# to mean one row, not "the seventh one if you do not count the sub-headings".
+COLS = ["Sl No", "Test", "Result", "Unit", "Reference Range"]
+C_SL, C_TEST, C_RESULT, C_UNIT, C_REF = range(len(COLS))
+# The data columns, in order - everything except the serial, which is generated.
+C_DATA = (C_TEST, C_RESULT, C_UNIT, C_REF)
+
+BILL_COLS = ["Sl No", "Service / Test", f"Amount ({billing.CURRENCY})"]
+B_SL, B_SERVICE, B_AMOUNT = range(len(BILL_COLS))
+
+# Wide enough for a three-figure serial and its heading, narrow enough that it
+# never competes with the column it is numbering.
+SERIAL_WIDTH = 62
 DATE_FMT = "%d-%m-%Y %I:%M %p"
 QT_DATE_FMT = "dd-MM-yyyy hh:mm AP"
 
@@ -412,12 +423,16 @@ class ReportForm(QWidget):
         self.table.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.table.setAlternatingRowColors(True)
         header = self.table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.Stretch)
-        for i in (1, 2, 3):
+        # The serial is generated, so its column is fixed - dragging it would
+        # only ever make room for digits that are not going to be typed.
+        header.setSectionResizeMode(C_SL, QHeaderView.Fixed)
+        header.setSectionResizeMode(C_TEST, QHeaderView.Stretch)
+        for i in (C_RESULT, C_UNIT, C_REF):
             header.setSectionResizeMode(i, QHeaderView.Interactive)
-        self.table.setColumnWidth(1, 150)
-        self.table.setColumnWidth(2, 130)
-        self.table.setColumnWidth(3, 190)
+        self.table.setColumnWidth(C_SL, SERIAL_WIDTH)
+        self.table.setColumnWidth(C_RESULT, 150)
+        self.table.setColumnWidth(C_UNIT, 130)
+        self.table.setColumnWidth(C_REF, 190)
         self.table.verticalHeader().setVisible(False)
         self.table.setMinimumHeight(230)
         self.table.itemChanged.connect(self._item_changed)
@@ -517,13 +532,17 @@ class ReportForm(QWidget):
         self.bill_table.setSelectionBehavior(QAbstractItemView.SelectItems)
         self.bill_table.setAlternatingRowColors(True)
         bill_header = self.bill_table.horizontalHeader()
-        bill_header.setSectionResizeMode(0, QHeaderView.Stretch)
-        bill_header.setSectionResizeMode(1, QHeaderView.Fixed)
-        self.bill_table.setColumnWidth(1, 170)
+        # Numbered the same way the printed bill numbers its services, so a line
+        # queried at the counter can be found on the screen by its number.
+        bill_header.setSectionResizeMode(B_SL, QHeaderView.Fixed)
+        bill_header.setSectionResizeMode(B_SERVICE, QHeaderView.Stretch)
+        bill_header.setSectionResizeMode(B_AMOUNT, QHeaderView.Fixed)
+        self.bill_table.setColumnWidth(B_SL, SERIAL_WIDTH)
+        self.bill_table.setColumnWidth(B_AMOUNT, 170)
         # The amount column is the only thing on this card the operator types,
         # so it is drawn as a box with a 0.00 in it rather than as a bare cell.
         self.bill_table.setItemDelegateForColumn(
-            1, AmountDelegate(self.bill_table, V.AMOUNT_PATTERN))
+            B_AMOUNT, AmountDelegate(self.bill_table, V.AMOUNT_PATTERN))
         # One click into the box starts typing: an amount is a two-second edit
         # and a double-click requirement is felt on every single bill.
         self.bill_table.setEditTriggers(self.BILL_TRIGGERS)
@@ -635,16 +654,21 @@ class ReportForm(QWidget):
             self.bill_table.setRowCount(0)
             for i, item in enumerate(items):
                 self.bill_table.insertRow(i)
+                serial = self._serial_cell()
+                # Every bill line is a charge, so unlike the results grid there
+                # is nothing here to skip: the numbers run straight down.
+                serial.setText(str(i + 1))
+                self.bill_table.setItem(i, B_SL, serial)
                 service = QTableWidgetItem(item.service)
                 # The service name is not typed here - it is whatever panel the
                 # operator ticked, and editing it would only let the bill drift
                 # away from the results it is charging for.
                 service.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
                 service.setToolTip("Comes from the panels selected above.")
-                self.bill_table.setItem(i, 0, service)
+                self.bill_table.setItem(i, B_SERVICE, service)
                 amount = QTableWidgetItem(item.amount)
                 amount.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
-                self.bill_table.setItem(i, 1, amount)
+                self.bill_table.setItem(i, B_AMOUNT, amount)
         finally:
             self._bill_loading = False
         self.bill_empty.setVisible(not items)
@@ -674,7 +698,7 @@ class ReportForm(QWidget):
     def _mark_amount_cell(self, row: int) -> bool:
         """Red-italic an unusable amount, the same way the results grid marks a
         bad cell. Returns True when the cell is fine."""
-        cell = self.bill_table.item(row, 1)
+        cell = self.bill_table.item(row, B_AMOUNT)
         if cell is None:
             return True
         problem = V.check_amount(cell.text(), "amount")
@@ -731,8 +755,8 @@ class ReportForm(QWidget):
     def _collect_billing(self) -> Billing:
         items = []
         for row in range(self.bill_table.rowCount()):
-            service = self.bill_table.item(row, 0)
-            amount = self.bill_table.item(row, 1)
+            service = self.bill_table.item(row, B_SERVICE)
+            amount = self.bill_table.item(row, B_AMOUNT)
             if service is None or not service.text().strip():
                 continue
             items.append(BillItem(
@@ -911,35 +935,79 @@ class ReportForm(QWidget):
         self._loading = True
         r = self.table.rowCount()
         self.table.insertRow(r)
-        for col, value in enumerate((row.name, row.result, row.unit, row.ref)):
+        self.table.setItem(r, C_SL, self._serial_cell())
+        for col, value in zip(C_DATA, (row.name, row.result, row.unit, row.ref)):
             item = QTableWidgetItem(value)
-            if col == 0:
+            if col == C_TEST:
                 item.setData(Qt.UserRole, row.panel)
                 item.setData(HEADING_ROLE, row.kind)
             self.table.setItem(r, col, item)
 
         if row.is_heading():
             self._style_heading(r)
+        self._renumber()
         self._loading = False
         self._restyle_row(r)
         self._update_row_count()
 
+    @staticmethod
+    def _serial_cell() -> QTableWidgetItem:
+        """A serial box: generated by the app, so it is never typed into and
+        never tabbed onto - moving across a row should land on the first thing
+        that can be edited, not on a number the operator does not own."""
+        cell = QTableWidgetItem("")
+        cell.setFlags(Qt.ItemIsEnabled)
+        cell.setTextAlignment(Qt.AlignCenter)
+        cell.setForeground(QBrush(QColor(MUTED)))
+        return cell
+
+    def _renumber(self):
+        """Number the test rows 1, 2, 3 down the grid.
+
+        Sub-headings are passed over rather than numbered: a heading is a band
+        across the sheet, not a line item, and numbering it would put the
+        screen's serials permanently out of step with the printed report - which
+        is the one thing this column exists to prevent.
+
+        Called after anything that changes which rows exist, because a serial
+        left over from before a deletion is worse than no serial at all.
+        """
+        was_loading = self._loading
+        self._loading = True
+        try:
+            number = 0
+            for r in range(self.table.rowCount()):
+                cell = self.table.item(r, C_SL)
+                if cell is None:
+                    cell = self._serial_cell()
+                    self.table.setItem(r, C_SL, cell)
+                if self.is_heading_row(r):
+                    cell.setText("")
+                    continue
+                number += 1
+                cell.setText(str(number))
+        finally:
+            self._loading = was_loading
+
     def _style_heading(self, r: int):
         """A sub-heading is a band across the grid: no result, unit or range."""
-        head = self.table.item(r, 0)
+        head = self.table.item(r, C_TEST)
         font = QFont()
         font.setBold(True)
         head.setFont(font)
         head.setForeground(QBrush(QColor(ACCENT_DARK)))
         head.setBackground(QBrush(QColor(SURFACE_ALT)))
-        for col in (1, 2, 3):
+        serial = self.table.item(r, C_SL)
+        if serial is not None:
+            serial.setBackground(QBrush(QColor(SURFACE_ALT)))
+        for col in (C_RESULT, C_UNIT, C_REF):
             cell = self.table.item(r, col)
             cell.setText("")
             cell.setFlags(Qt.ItemIsEnabled)
             cell.setBackground(QBrush(QColor(SURFACE_ALT)))
 
     def is_heading_row(self, r: int) -> bool:
-        item = self.table.item(r, 0)
+        item = self.table.item(r, C_TEST)
         return item is not None and item.data(HEADING_ROLE) == "heading"
 
     def _update_row_count(self):
@@ -953,6 +1021,7 @@ class ReportForm(QWidget):
             return
         for r in rows:
             self.table.removeRow(r)
+        self._renumber()
         self._update_row_count()
         self._sync_bill_items()
 
@@ -964,7 +1033,7 @@ class ReportForm(QWidget):
         if self._loading or self._styling:
             return
         self._restyle_row(item.row())
-        if item.column() == 0:
+        if item.column() == C_TEST:
             # Naming a hand-added row is what makes it billable, so the bill has
             # to follow the test name as well as the panel ticks.
             self._sync_bill_items()
@@ -973,13 +1042,13 @@ class ReportForm(QWidget):
         """The validation message for one grid cell, or None."""
         item = self.table.item(r, col)
         text = item.text() if item else ""
-        if col == 0:
+        if col == C_TEST:
             return V.check_test_name(text, "test name")
-        if col == 1:
+        if col == C_RESULT:
             return V.check_result_value(text)
-        if col == 2:
+        if col == C_UNIT:
             return V.check_unit(text)
-        if col == 3:
+        if col == C_REF:
             return V.check_reference(text)
         return None
 
@@ -993,7 +1062,7 @@ class ReportForm(QWidget):
         if item is None:
             return
         problem = self._cell_problem(r, col)
-        if not problem and col == 1:
+        if not problem and col == C_RESULT:
             # The result column already carries its H / L styling; resetting it
             # here would wipe the red on an out-of-range value.
             return None
@@ -1019,8 +1088,8 @@ class ReportForm(QWidget):
             self._styling = False
 
     def _restyle_row_now(self, r: int):
-        result_item = self.table.item(r, 1)
-        ref_item = self.table.item(r, 3)
+        result_item = self.table.item(r, C_RESULT)
+        ref_item = self.table.item(r, C_REF)
         if result_item is None or ref_item is None:
             return
 
@@ -1033,7 +1102,7 @@ class ReportForm(QWidget):
                                 "L": "Below reference range"}.get(flag, ""))
 
         # last, so an invalid cell always shows as invalid rather than as a flag
-        for col in (0, 1, 2, 3):
+        for col in C_DATA:
             self._mark_cell(r, col)
 
     def _panel_toggled(self, panel: str, checked: bool):
@@ -1045,9 +1114,10 @@ class ReportForm(QWidget):
                     kind=row.get("kind", "test")))
         else:
             for r in range(self.table.rowCount() - 1, -1, -1):
-                item = self.table.item(r, 0)
+                item = self.table.item(r, C_TEST)
                 if item is not None and item.data(Qt.UserRole) == panel:
                     self.table.removeRow(r)
+            self._renumber()
             self._update_row_count()
         self._sync_bill_items()
 
@@ -1056,13 +1126,14 @@ class ReportForm(QWidget):
         sex = self.f_sex.currentText()
         self._loading = True
         for r in range(self.table.rowCount()):
-            name_item = self.table.item(r, 0)
+            name_item = self.table.item(r, C_TEST)
             if name_item is None:
                 continue
             panel = name_item.data(Qt.UserRole)
             for row in templates.rows_for(panel or ""):
                 if row["name"] == name_item.text() and row.get("kind") != "heading":
-                    self.table.item(r, 3).setText(templates.ref_for(row, sex))
+                    self.table.item(r, C_REF).setText(
+                        templates.ref_for(row, sex))
                     break
         self._loading = False
         for r in range(self.table.rowCount()):
@@ -1075,19 +1146,21 @@ class ReportForm(QWidget):
         that will be saved and printed."""
         rows = []
         for r in range(self.table.rowCount()):
-            name = self.table.item(r, 0)
+            name = self.table.item(r, C_TEST)
             if name is None or not name.text().strip():
                 continue
             heading = self.is_heading_row(r)
+
+            def cell(col: int, r=r, heading=heading) -> str:
+                item = self.table.item(r, col)
+                return "" if heading or item is None else item.text().strip()
+
             rows.append(TestRow(
                 panel=name.data(Qt.UserRole) or "Investigations",
                 name=name.text().strip(),
-                result="" if heading else
-                (self.table.item(r, 1).text() if self.table.item(r, 1) else "").strip(),
-                unit="" if heading else
-                (self.table.item(r, 2).text() if self.table.item(r, 2) else "").strip(),
-                ref="" if heading else
-                (self.table.item(r, 3).text() if self.table.item(r, 3) else "").strip(),
+                result=cell(C_RESULT),
+                unit=cell(C_UNIT),
+                ref=cell(C_REF),
                 kind="heading" if heading else "test",
             ))
         return rows
@@ -1235,14 +1308,14 @@ class ReportForm(QWidget):
 
         for r in range(self.table.rowCount()):
             if self.is_heading_row(r):
-                if not self.table.item(r, 0).text().strip():
+                if not self.table.item(r, C_TEST).text().strip():
                     self.notify.emit(f"Row {r + 1}: give the sub-heading a name.",
                                      "warning")
-                    self.table.setCurrentCell(r, 0)
+                    self.table.setCurrentCell(r, C_TEST)
                     return False
                 continue
-            for col, field in ((0, "test"), (1, "result"), (2, "unit"),
-                               (3, "reference range")):
+            for col, field in zip(C_DATA, ("test", "result", "unit",
+                                           "reference range")):
                 message = self._cell_problem(r, col)
                 if message:
                     self.notify.emit(f"Row {r + 1} ({field}): {message}", "warning")
@@ -1267,13 +1340,13 @@ class ReportForm(QWidget):
             return False
 
         for row in range(self.bill_table.rowCount()):
-            service = self.bill_table.item(row, 0)
-            amount = self.bill_table.item(row, 1)
+            service = self.bill_table.item(row, B_SERVICE)
+            amount = self.bill_table.item(row, B_AMOUNT)
             label = f"amount for {service.text()}" if service else "amount"
             message = V.check_amount(amount.text() if amount else "", label)
             if message:
                 self.notify.emit(message, "warning")
-                self.bill_table.setCurrentCell(row, 1)
+                self.bill_table.setCurrentCell(row, B_AMOUNT)
                 return False
 
         problem = V.check_amount(self.f_deposit.text(), "net deposit")

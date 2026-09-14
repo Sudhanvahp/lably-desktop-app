@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (
 from .. import templates
 from .. import validators as V
 from . import icons
-from .theme import ACCENT_DARK, DANGER, MUTED, S2, S3, SURFACE_ALT
+from .theme import ACCENT_DARK, DANGER, S2, S3, SURFACE_ALT
 from .widgets import Card, PageHeader, icon_button
 
 KIND, NAME, UNIT, REF_M, REF_F = range(5)

@@ -8,7 +8,7 @@ NAV_TAGLINE = "Pathology Reports"
 # rename: renaming it would orphan every report already on disk.
 DATA_FOLDER = "BloodReportApp"
 
-APP_VERSION = "v1.2"   # centred letterhead, timings, Drive backup, launch splash
+APP_VERSION = "v1.3"   # report and bill fully separated, Sl No grids, preview zoom
 
 # Who made it, shown in the footer under every page. Separate from APP_NAME:
 # the product can be renamed or white-labelled without touching the vendor.

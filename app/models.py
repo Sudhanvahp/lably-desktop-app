@@ -16,15 +16,14 @@ class LabProfile:
     holidays: str = ""          # when the lab is shut, e.g. "Sundays & public holidays"
     backup_dir: str = ""        # a synced folder (Google Drive, OneDrive) copied to on save
     backup_declined: str = ""   # "1" once the operator has said not to ask about Drive again
-    pathologist: str = ""
-    pathologist_degrees: str = ""
+    # The technician is the report's only signatory - they ran the tests, so
+    # they are who signs for them. The bill has its own Billed By line.
     technician: str = ""                # lab technician who ran the tests
     technician_signature_path: str = ""
     footer_note: str = ""
     bill_notes: str = ""        # one note per line; the bill numbers them
     billed_by: str = ""         # default staff name on a new bill
     logo_path: str = ""
-    signature_path: str = ""
 
     @staticmethod
     def from_dict(d: Dict[str, Any]) -> "LabProfile":

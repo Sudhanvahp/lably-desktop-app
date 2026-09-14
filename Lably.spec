@@ -54,7 +54,13 @@ exe = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
+    # Deliberately off. UPX-packing an exe is one of the strongest heuristic
+    # signals antivirus engines have: self-extracting compressed code is what
+    # droppers look like, so a packed build gets flagged far more often than an
+    # unpacked one. UPX is not on this machine's PATH today, which means the
+    # setting is currently doing nothing anyway - pinning it False stops a build
+    # on some other machine from silently becoming a packed one.
+    upx=False,
     upx_exclude=[],
     runtime_tmpdir=None,
     console=False,          # no console window behind the app

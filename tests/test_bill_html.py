@@ -191,11 +191,13 @@ class ClosingFigureTests(unittest.TestCase):
         self.assertIn("Billed By", html)
         self.assertEqual(html.count("Miss. NETHRA H M"), 2)
 
-    def test_no_clerk_means_no_signature_block(self):
+    def test_the_billed_by_line_is_printed_even_with_no_name_on_file(self):
+        """A bill has to say who to come back to about it, so the label prints
+        with a rule to sign on rather than going missing along with the name."""
         html = build(sample_report(billing=sample_bill(billed_by="")),
                      sample_profile())
-        self.assertNotIn("Printed By", html)
-        self.assertNotIn("Billed By", html)
+        self.assertIn("Printed By", html)
+        self.assertIn("Billed By", html)
 
 
 class NoteTests(unittest.TestCase):
