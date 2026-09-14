@@ -136,6 +136,14 @@ and standing terms are fixed cost; each service line is about eighteen points on
 top. Three services fit comfortably; a longer bill flows onto a second slip rather
 than truncating.
 
+The closing figures are **one table cell, not three rows**. Qt breaks a page at
+the nearest row boundary and will take one inside a nested table, so on a bill
+long enough to need a second slip the box was being cut through - stranding
+*Balance* at the top of slip two with nothing above it to say what it was the
+balance of. Qt has no `page-break-inside: avoid`, so a single cell is the only
+lever there is; the lines between the figures are drawn rules rather than table
+borders, which is why it still looks like a box.
+
 Getting it to fit turned up a Qt trap worth knowing: **Qt puts a minimum line box
 around every block it lays out**, so a `<div>` used purely as a spacer costs about
 five points whatever font size it is given. A dozen of those was eighty points -
@@ -483,6 +491,31 @@ folder works the same way. Saving never fails because of the backup - if the fol
 missing or unwritable, the report is still saved locally and a warning is shown. Saving a
 report again after correcting the patient's name replaces the earlier copy rather than
 leaving two spellings in Drive. Deleting a report in the app does not delete its backup.
+
+## Keeping it aligned
+
+Three rules hold the two documents straight, all of them learned the hard way.
+
+**Nothing uses `cellpadding` for vertical space.** It applies to all four sides,
+so a block that wanted a little air above it also indented itself - and with
+three different amounts in use, the bill had four different left edges running
+down it. Space between blocks belongs to the band that holds them.
+
+**Qt honours `white-space: nowrap` only on blocks and table cells, never on an
+inline `<span>`.** So a long line cannot be told "break between these pairs, not
+inside a value" - it breaks wherever the last character fits, which printed
+`Reg. No KA/SMG/` on one line and `2019/118` on the next. Where a line might not
+fit, the letterhead chooses its own breaks instead of leaving it to the layout.
+
+**A field's value column is set to `width="100%"`.** That is what keeps a colon
+against its label: told to fill the row, the value takes all the slack and the
+label and colon keep their natural size. Without it Qt shares the surplus out,
+and a column of short values pushes every colon clear of the word it belongs to.
+
+There is a test for each of these, and two of them measure the rendered pixels
+rather than the markup - `PrintedAlignmentTests` renders a page, finds the left
+edge of every line on it and fails if they disagree by more than a few points.
+Alignment is a property of the printed page, and that is where it is checked.
 
 ## Printing
 

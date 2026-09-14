@@ -301,3 +301,44 @@ class RobustnessTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LongBillPaginationTests(unittest.TestCase):
+    """A bill too long for one slip must not be cut through its own figures."""
+
+    def long_bill(self, services=8):
+        return sample_report(billing=sample_bill(
+            items=[BillItem(f"Investigation Panel Number {i}", "450")
+                   for i in range(1, services + 1)],
+            net_deposit="1200"))
+
+    def closing_block(self, report):
+        html = build(report, sample_profile())
+        return html[html.index("Net Payable Amt"):html.index("Printed By")]
+
+    def test_the_closing_figures_are_one_unbreakable_block(self):
+        """Qt takes a page break at the nearest row boundary and will take one
+        inside a nested table. With the figures as three rows of a bordered
+        table, a bill long enough to need a second slip was cut through them -
+        stranding Balance at the top of slip two with nothing above it to say
+        what it was the balance of.
+
+        So the box is one cell, and the lines between the figures are drawn
+        rules rather than table rows: two of them, for three figures.
+        """
+        self.assertEqual(self.closing_block(self.long_bill()).count('height="1"'),
+                         2, "the figures must be separated by rules, not rows")
+
+    def test_the_figures_are_all_still_printed(self):
+        html = build(self.long_bill(), sample_profile())
+        for label in ("Net Payable Amt", "Net Deposit Amt", "Balance"):
+            self.assertIn(label, html)
+        self.assertIn("3,600.00", html)   # eight services at 450
+        self.assertIn("1,200.00", html)   # deposit
+        self.assertIn("2,400.00", html)   # balance
+
+    def test_a_short_bill_is_laid_out_the_same_way(self):
+        """One code path, so the slip a lab sees every day is the one tested."""
+        self.assertEqual(
+            self.closing_block(sample_report(billing=sample_bill())).count(
+                'height="1"'), 2)

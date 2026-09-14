@@ -2546,3 +2546,138 @@ class ProfileFieldTests(UICase):
 
         for key, _ in self.window.settings.FIELDS:
             self.assertTrue(hasattr(LabProfile(), key), key)
+
+
+class PrintedAlignmentTests(UICase):
+    """Every left-aligned block on a printed page starts at the same x.
+
+    Measured on the rendered pixels rather than asserted about the markup,
+    because that is where this bug lives: the bill had four different left
+    edges running down it, and the cause was `cellpadding` on tables used only
+    to place things side by side. cellpadding applies to all four sides, so a
+    block asking for a little vertical breathing room was also indenting
+    itself - invisible in the HTML, obvious on paper.
+    """
+
+    MM = 72 / 25.4      # points per millimetre; the document is laid out in points
+    SCALE = 2           # pixels per point
+    WINDOW = 120        # how far right of the margin a line still counts as flush left
+    TOLERANCE = 4       # px; glyph side bearings alone are worth about 2
+    MIN_LINE = 6        # px; thinner than this is a rule, not a line of text
+
+    def render(self, html, paper_mm, margins_mm):
+        """Page one, laid out exactly as printing.py lays it out."""
+        from PySide6.QtCore import QSizeF, Qt
+        from PySide6.QtGui import QFont, QImage, QPainter, QTextDocument
+
+        pw, ph = (v * self.MM for v in paper_mm)
+        ml, mt, mr, mb = (v * self.MM for v in margins_mm)
+
+        doc = QTextDocument()
+        doc.setDefaultFont(QFont("Segoe UI", 10))
+        doc.setDocumentMargin(0)
+        doc.setHtml(html)
+        doc.setPageSize(QSizeF(pw - ml - mr, ph - mt - mb))
+
+        image = QImage(int(pw * self.SCALE), int(ph * self.SCALE),
+                       QImage.Format_RGB32)
+        image.fill(Qt.white)
+        painter = QPainter(image)
+        painter.scale(self.SCALE, self.SCALE)
+        painter.translate(ml, mt)
+        painter.setClipRect(0, 0, pw - ml - mr, ph - mt - mb)
+        doc.drawContents(painter)
+        painter.end()
+        return image, ml
+
+    @staticmethod
+    def _ink(image, x, y):
+        return image.pixelColor(x, y).lightness() < 200
+
+    def content_start(self, image, margin_pt):
+        """The first column that holds text rather than a rule.
+
+        The bill draws a frame around itself, and a frame is ink on every row -
+        so measured naively it is the left edge of every line on the page. A
+        vertical rule is recognisable by exactly that: ink nearly all the way
+        down. Whatever is flush left starts after the last of them.
+        """
+        margin = int(margin_pt * self.SCALE)
+        sampled = range(0, image.height(), 4)
+        total = len(list(sampled))
+        rules = [x for x in range(margin, margin + 40)
+                 if sum(1 for y in sampled if self._ink(image, x, y)) > total * 0.5]
+        return (max(rules) + 1) if rules else margin
+
+    def left_edges(self, image, x_from):
+        """The left edge of every line of ink that starts near the margin.
+
+        Only a window of columns is scanned, which does two jobs at once: it
+        keeps the scan quick, and it leaves centred text out of the comparison
+        entirely - a centred line has no ink this far left, so it simply does
+        not take part.
+
+        Runs thinner than a line of text are dropped. A horizontal rule is one
+        or two pixels tall and starts at whatever drew it - the frame's own top
+        and bottom borders begin a couple of pixels inside its verticals - so
+        counting them as lines would compare a border against a paragraph.
+        """
+        stop = min(x_from + self.WINDOW, image.width())
+        edges, run = [], None
+        for y in range(image.height()):
+            edge = None
+            for x in range(x_from, stop):
+                if self._ink(image, x, y):
+                    edge = x
+                    break
+            if edge is None:
+                if run is not None:
+                    if run["rows"] >= self.MIN_LINE:
+                        edges.append(run["left"])
+                    run = None
+            elif run is None:
+                run = {"left": edge, "rows": 1}
+            else:
+                run["left"] = min(run["left"], edge)
+                run["rows"] += 1
+        if run is not None and run["rows"] >= self.MIN_LINE:
+            edges.append(run["left"])
+        return edges
+
+    def test_every_flush_left_block_on_the_bill_shares_one_margin(self):
+        from app.bill_html import build as build_bill
+
+        self.fill()
+        self.form.bill_table.item(0, B_AMOUNT).setText("400")
+        self.form.f_billed_by.setText("Nethra H M")
+        self.form.f_deposit.setText("250")
+        profile = self.storage.load_profile()
+        profile.bill_notes = "Please bring this receipt when collecting\nKept one month"
+        self.storage.save_profile(profile)
+
+        image, margin = self.render(
+            build_bill(self.form.collect(), self.storage.load_profile()),
+            (210, 148), (8, 7, 8, 7))
+        edges = self.left_edges(image, self.content_start(image, margin))
+
+        self.assertGreater(len(edges), 5, "nothing was rendered to measure")
+        self.assertLessEqual(
+            max(edges) - min(edges), self.TOLERANCE,
+            f"bill blocks start at different x: {sorted(set(edges))}")
+
+    def test_every_flush_left_block_on_the_report_shares_one_margin(self):
+        from app.report_html import build
+
+        self.fill()
+        image, margin = self.render(
+            build(self.form.collect(), self.storage.load_profile()),
+            (210, 297), (14, 13, 14, 13))
+        # Table cell text is inset by the table's own padding, which is correct
+        # and not what this guards against - so this checks the other end: no
+        # band, rule or table may start left of the page margin, and the
+        # outermost ink on the page must be the margin itself.
+        edges = self.left_edges(image, int(margin * self.SCALE))
+
+        self.assertGreater(len(edges), 4, "nothing was rendered to measure")
+        self.assertEqual(min(edges), int(margin * self.SCALE),
+                         "something starts left of the page margin")

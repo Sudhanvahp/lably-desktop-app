@@ -118,14 +118,31 @@ def letterhead(lab: LabProfile) -> str:
         ]
         return "&nbsp;&nbsp;&middot;&nbsp;&nbsp;".join(parts)
 
-    contact = keyed((("Tel", lab.phone), ("Mob", lab.mobile),
-                     ("Email", lab.email), ("Reg. No", lab.reg_no)))
-    if contact:
-        lines.append(f'<div class="sub" align="center">{contact}</div>')
+    def add(cls: str, *groups) -> None:
+        """One centred line per group, skipping any group that is all blank.
 
-    hours = keyed((("Timings", lab.timings), ("Holidays", lab.holidays)))
-    if hours:
-        lines.append(f'<div class="hours" align="center">{hours}</div>')
+        Deliberate line breaks, rather than one long line left to wrap. Qt
+        honours `white-space: nowrap` only on block and cell elements - never
+        on an inline span - so there is no way to tell it "break between pairs,
+        never inside a value". Left to itself it broke wherever the last
+        character fit, which printed "Reg. No KA/SMG/" on one line and
+        "2019/118" on the next; a registration number split across two lines is
+        not a registration number. Choosing the breaks here is the only way to
+        guarantee a value stays whole, and each of these lines is short enough
+        to fit the page with room to spare.
+        """
+        for group in groups:
+            row = keyed(group)
+            if row:
+                lines.append(f'<div class="{cls}" align="center">{row}</div>')
+
+    # The numbers to ring, then what identifies the lab on paper.
+    add("sub",
+        (("Tel", lab.phone), ("Mob", lab.mobile)),
+        (("Email", lab.email), ("Reg. No", lab.reg_no)))
+    # Timings and holidays are free text a lab types itself, so their length is
+    # not knowable here - a line each, and neither can push the other off.
+    add("hours", (("Timings", lab.timings),), (("Holidays", lab.holidays),))
 
     # The logo sits in a column of its own and an empty column of the same
     # width balances it on the right, so the text block is centred on the page
@@ -158,16 +175,20 @@ def _title_bar(r: Report) -> str:
 
 def _patient_block(r: Report) -> str:
     age = f"{r.age} {dict(Y='Years', M='Months', D='Days').get(r.age_unit, '')}".strip()
+    # Per row: (label, value, must-not-break?). A value of fixed shape is never
+    # broken - a timestamp split after "15-09-2026" reads as a date on one line
+    # and a stray time on the next. Names are left breakable, because an
+    # unusually long one should wrap rather than widen its column.
     left = [
-        ("Patient Name", r.patient_name),
-        ("Age / Sex", " / ".join(x for x in (age, r.sex) if x)),
-        ("Patient ID", r.patient_id),
-        ("Referred By", r.referred_by),
+        ("Patient Name", r.patient_name, False),
+        ("Age / Sex", " / ".join(x for x in (age, r.sex) if x), True),
+        ("Patient ID", r.patient_id, True),
+        ("Referred By", r.referred_by, False),
     ]
     right = [
-        ("Sample Type", r.sample_type),
-        ("Collected On", r.collected_on),
-        ("Reported On", r.reported_on),
+        ("Sample Type", r.sample_type, True),
+        ("Collected On", r.collected_on, True),
+        ("Reported On", r.reported_on, True),
     ]
 
     def col(items):
@@ -176,7 +197,7 @@ def _patient_block(r: Report) -> str:
         # path. The name is set a size larger again - it is the one field the
         # patient checks first.
         out = []
-        for k, v in items:
+        for k, v, tight in items:
             if not v:
                 continue
             shown = f"<b>{escape(v)}</b>"
@@ -185,9 +206,16 @@ def _patient_block(r: Report) -> str:
                 shown = f'<span class="pname">{shown}</span>'
                 label = f'<span class="pname-lbl"><b>{label}</b></span>'
             out.append(
+                # The value column claims the whole width, which is what keeps
+                # the colon against its label: told to fill 100%, it takes all
+                # the slack and leaves the label and colon at their natural
+                # size. Without it Qt shares the surplus out, and a column of
+                # short values - "Blood" on its own - pushed the colons half an
+                # inch clear of the words they belong to.
                 f'<tr><td class="lbl" valign="top">{label}</td>'
                 f'<td class="cln" valign="top">:</td>'
-                f'<td class="val" valign="top">{shown}</td></tr>')
+                f'<td width="100%" valign="top"'
+                f' class="{"val tight" if tight else "val"}">{shown}</td></tr>')
         return "".join(out)
 
     return (
@@ -253,9 +281,9 @@ def _panel_header(title: str) -> str:
 def _rows_table(rows: List[TestRow]) -> str:
     out = [
         '<table width="100%" class="results" cellspacing="0" cellpadding="5">',
-        f'<tr><th bgcolor="{HEAD_BG}" align="left" width="40%">TEST</th>'
-        f'<th bgcolor="{HEAD_BG}" align="left" width="17%">RESULT</th>'
-        f'<th bgcolor="{HEAD_BG}" align="left" width="15%">UNIT</th>'
+        f'<tr><th bgcolor="{HEAD_BG}" align="left" width="38%">TEST</th>'
+        f'<th bgcolor="{HEAD_BG}" align="left" width="16%">RESULT</th>'
+        f'<th bgcolor="{HEAD_BG}" align="left" width="18%">UNIT</th>'
         f'<th bgcolor="{HEAD_BG}" align="left" width="28%">REFERENCE RANGE</th></tr>',
     ]
     striped = 0
@@ -395,22 +423,32 @@ body {{ font-family: 'Segoe UI', Calibri, Arial, sans-serif; font-size: 10pt;
 .bandmeta {{ color: #ffffff; font-size: 9.5pt; letter-spacing: 0.5px; }}
 .bandlbl {{ color: {ACCENT_LINE}; font-size: 8.5pt; letter-spacing: 1px; }}
 .patient {{ font-size: 9.5pt; }}
-.lbl {{ color: {MUTED}; font-size: 9pt; }}
-.cln {{ color: {ACCENT_LINE}; padding-left: 4px; padding-right: 8px; }}
+/* Field labels never wrap. Qt sizes a table column to whatever it thinks the
+   content needs, and left to itself it decided "Collected On" would do nicely
+   as "Collected" over "On" - which reads as a different field. A nowrap cell
+   claims its natural width and the table gives the slack to the value column,
+   which is the one that can take it. */
+.lbl {{ color: {MUTED}; font-size: 9pt; white-space: nowrap; }}
+.cln {{ color: {ACCENT_LINE}; padding-left: 4px; padding-right: 8px;
+        white-space: nowrap; }}
 .val {{ font-weight: bold; color: {INK}; font-size: 9.5pt; }}
+.tight {{ white-space: nowrap; }}
 .tilelbl {{ font-size: 7.5pt; font-weight: bold; color: {MUTED};
             letter-spacing: 1.5px; }}
 .tileval {{ font-size: 17pt; font-weight: bold; }}
 .panel {{ color: #ffffff; font-size: 10.5pt; font-weight: bold;
           letter-spacing: 1.5px; }}
 table.results th {{ font-size: 8pt; color: {INK_SOFT}; letter-spacing: 1.5px;
-                    border-bottom: 1px solid #b0c0cf; }}
+                    border-bottom: 1px solid #b0c0cf; white-space: nowrap; }}
 table.results td {{ border-bottom: 1px solid {RULE}; font-size: 9.5pt; }}
 .tname {{ color: {INK}; }}
 .abnname {{ font-weight: bold; }}
-.unit {{ color: {INK_SOFT}; font-size: 9pt; }}
-.ref {{ color: {MUTED}; font-size: 9pt; }}
-.abnref {{ color: {CRIMSON}; font-size: 9pt; }}
+/* Units and ranges are short and fixed in shape - "millions/cmm" broken over
+   two lines, or "12.0 -" over "15.0", is noise in the column a clinician reads
+   fastest. Both claim their natural width; the test name column absorbs it. */
+.unit {{ color: {INK_SOFT}; font-size: 9pt; white-space: nowrap; }}
+.ref {{ color: {MUTED}; font-size: 9pt; white-space: nowrap; }}
+.abnref {{ color: {CRIMSON}; font-size: 9pt; white-space: nowrap; }}
 .ok {{ font-weight: bold; color: {INK}; font-size: 10pt; }}
 .abn {{ color: {CRIMSON}; font-weight: bold; }}
 td.subhead {{ font-weight: bold; font-size: 8pt; color: {BAND};

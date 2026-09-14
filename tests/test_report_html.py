@@ -4,7 +4,7 @@ import unittest
 
 from app.billing import CURRENCY
 from app.models import BillItem, Billing, LabProfile, Report, TestRow
-from app.report_html import build, letterhead
+from app.report_html import CSS, build, letterhead
 
 
 def sample_report(**kwargs):
@@ -287,3 +287,80 @@ class LabelEmphasisTests(unittest.TestCase):
         html = build(sample_report(), sample_profile())
         self.assertIn('<span class="pname-lbl"><b>Patient Name</b></span>', html)
         self.assertIn("<b>Haemoglobin (Hb)</b>", html)
+
+
+class LetterheadWrappingTests(unittest.TestCase):
+    """The letterhead chooses its own line breaks.
+
+    Qt honours `white-space: nowrap` only on block and cell elements, never on
+    an inline span, so there is no way to tell it "break between pairs, never
+    inside a value". Left to itself it broke wherever the last character fit,
+    which printed "Reg. No KA/SMG/" on one line and "2019/118" on the next.
+    """
+
+    def lines(self, **profile):
+        html = letterhead(sample_profile(**profile))
+        return [chunk for chunk in html.split("<div") if "align=\"center\"" in chunk]
+
+    def test_the_numbers_to_ring_and_the_reference_numbers_are_separate_lines(self):
+        found = self.lines(phone="08182-225544", mobile="+91 98450 12345",
+                           email="lab@example.com", reg_no="KA/SMG/2019/118")
+        ringing = [ln for ln in found if "08182-225544" in ln]
+        filing = [ln for ln in found if "KA/SMG/2019/118" in ln]
+        self.assertEqual(len(ringing), 1)
+        self.assertEqual(len(filing), 1)
+        self.assertNotEqual(ringing[0], filing[0],
+                            "a long contact line must not be left to wrap")
+
+    def test_timings_and_holidays_are_separate_lines(self):
+        """Both are free text the lab types, so neither length is knowable
+        here and neither may push the other off its line."""
+        found = self.lines(timings="Mon-Sat 7:00 AM - 8:00 PM, Sun 7:00 AM - 1:00 PM",
+                           holidays="Public holidays")
+        timings = [ln for ln in found if "Mon-Sat" in ln]
+        holidays = [ln for ln in found if "Public holidays" in ln]
+        self.assertEqual(len(timings), 1)
+        self.assertEqual(len(holidays), 1)
+        self.assertNotEqual(timings[0], holidays[0])
+
+    def test_a_blank_group_prints_no_empty_line(self):
+        html = letterhead(sample_profile(phone="", mobile="", email="",
+                                         reg_no="", timings="", holidays=""))
+        self.assertNotIn("Tel", html)
+        self.assertNotIn("Timings", html)
+
+    def test_fixed_shape_values_never_wrap(self):
+        """A timestamp broken after the date reads as two different fields."""
+        html = build(sample_report(), sample_profile())
+        self.assertIn(".tight", CSS)
+        self.assertIn("white-space: nowrap", CSS)
+        self.assertIn('class="val tight"', html)
+
+
+class PatientBlockAlignmentTests(unittest.TestCase):
+    def test_the_value_column_claims_the_width(self):
+        """Which is what keeps a colon against its label. Told to fill 100% the
+        value column takes all the slack; without it Qt shares the surplus out,
+        and a column of short values pushed the colons clear of their words."""
+        html = build(sample_report(), sample_profile())
+        self.assertIn('<td width="100%" valign="top" class="val', html)
+
+    def test_a_short_value_does_not_push_the_colon_away(self):
+        """The bare case that showed it: one row, one four-letter value."""
+        thin = build(sample_report(sample_type="Blood", collected_on="",
+                                   reported_on=""), sample_profile())
+        self.assertIn('<td width="100%" valign="top" class="val tight">'
+                      "<b>Blood</b></td>", thin)
+
+    def test_labels_and_fixed_shape_values_are_both_nowrap(self):
+        self.assertIn(".lbl", CSS)
+        label_rule = CSS[CSS.index(".lbl"):CSS.index(".cln")]
+        self.assertIn("white-space: nowrap", label_rule)
+        tight_rule = CSS[CSS.index(".tight"):CSS.index(".tight") + 60]
+        self.assertIn("nowrap", tight_rule)
+
+    def test_a_long_patient_name_still_wraps(self):
+        """It is the one value that must give way rather than widen a column."""
+        html = build(sample_report(patient_name="A" * 60), sample_profile())
+        self.assertIn('class="val"', html)
+        self.assertNotIn('class="val tight"><b>' + "A" * 60, html)

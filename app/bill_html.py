@@ -48,12 +48,17 @@ def _box(content: str, border: int = 1, padding: int = 2) -> str:
     )
 
 
-def _plain(content: str, padding: int = 0) -> str:
-    """An unruled table, used purely to place things side by side."""
-    return (
-        f'<table width="100%" border="0" cellspacing="0"'
-        f' cellpadding="{padding}">{content}</table>'
-    )
+def _plain(content: str) -> str:
+    """An unruled table, used purely to place things side by side.
+
+    No padding, deliberately. cellpadding applies to all four sides, so a block
+    that used it for a little vertical breathing room was also indenting itself
+    a couple of points further than its neighbours - and with three different
+    amounts in use, the bill had four different left edges running down it.
+    Space between blocks is `_band`'s job; this one only arranges columns.
+    """
+    return ('<table width="100%" border="0" cellspacing="0"'
+            f' cellpadding="0">{content}</table>')
 
 
 def _hrule() -> str:
@@ -143,7 +148,7 @@ def _identity(r: Report) -> str:
         )
 
     def half(items) -> str:
-        return _plain("".join(row(*item) for item in items), padding=1)
+        return _plain("".join(row(*item) for item in items))
 
     # Each half is its own table inside a two-cell shell, rather than one
     # six-column table. In a single table the widest cell on either side sets
@@ -154,8 +159,7 @@ def _identity(r: Report) -> str:
         '<tr>'
         f'<td width="50%" valign="top">{half(left)}</td>'
         f'<td width="50%" valign="top">{half(right)}</td>'
-        "</tr>",
-        padding=0,
+        "</tr>"
     )
 
 
@@ -206,14 +210,29 @@ def _closing(r: Report) -> str:
     stronger constraint than a column boundary that merely looks tidy.
     """
     figures = summary(r.billing)
-    rows = "".join(
-        f'<tr><td class="boxlbl"><b>{label}</b></td>'
-        f'<td align="right" class="money"><b>'
-        f"{format_amount(figures[key])}</b></td></tr>"
-        for label, key in (("Net Payable Amt", "net_payable"),
-                           ("Net Deposit Amt", "net_deposit"),
-                           ("Balance", "balance"))
+    # One cell holding three ruled lines, not a table of three rows.
+    #
+    # Qt breaks a page at the nearest row boundary, and it will happily take one
+    # inside a nested table - so on a bill long enough to need a second slip,
+    # the closing figures were being cut in half, leaving Balance stranded at
+    # the top of slip two with nothing above it to say what it was the balance
+    # of. That is the one number on the bill a patient looks for. With no row to
+    # break at, the whole box moves to the second slip intact.
+    #
+    # Qt has no `page-break-inside: avoid`, so this is the only lever there is.
+    # The rules between the lines are drawn rather than inherited from a table
+    # border, which is why the box still looks like a box.
+    lines = "".join(
+        (_hrule() if i else "")
+        + _plain(f'<tr><td class="boxlbl"><b>{label}</b></td>'
+                 f'<td align="right" class="money"><b>'
+                 f"{format_amount(figures[key])}</b></td></tr>")
+        for i, (label, key) in enumerate(
+            (("Net Payable Amt", "net_payable"),
+             ("Net Deposit Amt", "net_deposit"),
+             ("Balance", "balance")))
     )
+    rows = f"<tr><td>{lines}</td></tr>"
 
     # What the bill comes to, in words, always. This is the figure the words are
     # there to protect - a total can be altered after the fact with one pen
@@ -231,10 +250,9 @@ def _closing(r: Report) -> str:
 
     return _plain(
         '<tr>'
-        f'<td width="62%" valign="middle" class="td">{words}</td>'
+        f'<td width="62%" valign="top" class="td">{words}</td>'
         f'<td width="38%" valign="top">{_box(rows)}</td>'
-        "</tr>",
-        padding=2,
+        "</tr>"
     )
 
 
@@ -286,10 +304,9 @@ def _signatories(r: Report) -> str:
     cell = above + '<div class="signrole">%s</div>'
     return _plain(
         "<tr>"
-        f'<td width="62%" class="td">{cell % "Printed By"}</td>'
-        f'<td width="38%" class="td">{cell % "Billed By"}</td>'
-        "</tr>",
-        padding=2,
+        f'<td width="62%" valign="top" class="td">{cell % "Printed By"}</td>'
+        f'<td width="38%" valign="top">{cell % "Billed By"}</td>'
+        "</tr>"
     )
 
 
@@ -317,10 +334,11 @@ body {{ font-family: Arial, 'Helvetica Neue', 'Segoe UI', sans-serif;
    is not knowable here - and "Net Payable" / "Amt" broken over two lines is the
    difference between a bill and a mess. A nowrap cell claims its natural width
    and the table gives the slack to the columns that can take it. */
-.key {{ font-weight: bold; font-size: 7pt; white-space: nowrap; }}
+.key {{ font-weight: bold; font-size: 7pt; white-space: nowrap;
+        padding-top: 1px; padding-bottom: 1px; }}
 .colon {{ font-size: 7pt; white-space: nowrap;
           padding-left: 4px; padding-right: 4px; }}
-.val {{ font-size: 7pt; }}
+.val {{ font-size: 7pt; padding-top: 1px; padding-bottom: 1px; }}
 .tight {{ white-space: nowrap; }}
 .th {{ font-weight: bold; font-size: 7pt; white-space: nowrap; }}
 .td {{ font-size: 7pt; }}
