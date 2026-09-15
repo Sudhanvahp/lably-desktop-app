@@ -38,6 +38,8 @@ class HistoryView(QWidget):
 
         self.header = PageHeader("Report History", "Every report you have saved")
         layout.addWidget(self.header)
+        # Search first: it is what the page is for. The tiles are a glance.
+        layout.addLayout(self._build_search())
         layout.addLayout(self._build_stats())
         layout.addWidget(self._build_list_card(), 1)
 
@@ -49,6 +51,24 @@ class HistoryView(QWidget):
             else "Every report you have saved")
 
     # ---------------------------------------------------------------- layout
+    def _build_search(self) -> QHBoxLayout:
+        self.search = QLineEdit()
+        self.search.setPlaceholderText(
+            "Search by patient name, patient ID, report no. or referring doctor")
+        self.search.setClearButtonEnabled(True)
+        self.search.addAction(icons.icon("search", MUTED, 16), QLineEdit.LeadingPosition)
+        self.search.textChanged.connect(self._refill)
+        self.search.setMinimumHeight(40)
+
+        refresh = icon_button("refresh", "Refresh", "Re-read the reports folder")
+        refresh.clicked.connect(self.reload)
+
+        top = QHBoxLayout()
+        top.setSpacing(S2)
+        top.addWidget(self.search, 1)
+        top.addWidget(refresh)
+        return top
+
     def _build_stats(self) -> QHBoxLayout:
         row = QHBoxLayout()
         row.setSpacing(S3)
@@ -67,23 +87,6 @@ class HistoryView(QWidget):
         self.count = QLabel("")
         self.count.setObjectName("CardHint")
         card.add_header_widget(self.count)
-
-        self.search = QLineEdit()
-        self.search.setPlaceholderText(
-            "Search by patient name, patient ID, report no. or referring doctor")
-        self.search.setClearButtonEnabled(True)
-        self.search.addAction(icons.icon("search", MUTED, 16), QLineEdit.LeadingPosition)
-        self.search.textChanged.connect(self._refill)
-        self.search.setMinimumHeight(38)
-
-        refresh = icon_button("refresh", "Refresh", "Re-read the reports folder")
-        refresh.clicked.connect(self.reload)
-
-        top = QHBoxLayout()
-        top.setSpacing(S2)
-        top.addWidget(self.search, 1)
-        top.addWidget(refresh)
-        card.add(top)
 
         self.table = self._build_table()
         self.empty = EmptyState(
@@ -109,7 +112,7 @@ class HistoryView(QWidget):
         table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         table.setAlternatingRowColors(True)
         table.setShowGrid(False)
-        table.verticalHeader().setVisible(False)
+        table.verticalHeader().setVisible(True)   # Sl. No. down the side
         table.verticalHeader().setDefaultSectionSize(38)
         table.horizontalHeader().setSectionResizeMode(CHECK, QHeaderView.Fixed)
         table.setColumnWidth(CHECK, 58)
@@ -140,6 +143,13 @@ class HistoryView(QWidget):
         row.addWidget(self.delete_selected_btn)
 
         row.addStretch(1)
+        # Same switch as the form: a reprint is the lab report alone unless
+        # the operator asks for the bill summary on the same sheet.
+        self.attach_bill = QCheckBox("Attach bill summary")
+        self.attach_bill.setToolTip(
+            "Print the bill summary under the results when previewing, "
+            "exporting or reprinting")
+        row.addWidget(self.attach_bill)
         for icon_name, text, tip, slot, kind in (
             ("copy", "Duplicate", "Same patient, blank results", self.duplicate_selected, "Danger"),
             ("preview", "Preview", "See it before printing", self.preview_selected, ""),
@@ -270,7 +280,8 @@ class HistoryView(QWidget):
         return report
 
     def _html(self, report):
-        return build(report, storage.load_profile())
+        return build(report, storage.load_profile(),
+                     with_bill=self.attach_bill.isChecked())
 
     # --------------------------------------------------------------- actions
     def open_selected(self):

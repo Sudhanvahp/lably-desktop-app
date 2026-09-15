@@ -80,7 +80,7 @@ def _path() -> str:
 
 
 def _blank() -> Dict[str, Any]:
-    return {"overrides": {}, "custom": {}, "deleted": [], "order": []}
+    return {"overrides": {}, "custom": {}, "deleted": [], "order": [], "prices": {}}
 
 
 def load_overlay() -> Dict[str, Any]:
@@ -102,6 +102,9 @@ def load_overlay() -> Dict[str, Any]:
         overlay["deleted"] = [str(x) for x in data["deleted"]]
     if isinstance(data.get("order"), list):
         overlay["order"] = [str(x) for x in data["order"]]
+    if isinstance(data.get("prices"), dict):
+        overlay["prices"] = {str(k): str(v).strip() for k, v in data["prices"].items()
+                             if str(v).strip()}
     return overlay
 
 
@@ -130,6 +133,25 @@ def rows_for(panel: str) -> List[Dict[str, str]]:
     if panel in overlay["custom"]:
         return [dict(r) for r in overlay["custom"][panel]]
     return default_rows(panel)
+
+
+def price_for(panel: str) -> str:
+    """The standing charge for a panel, as typed on Test Templates, or "".
+
+    Kept beside the panel rather than on the bill so it is typed once and
+    every report that ticks the panel starts with it filled in - the lab can
+    still overwrite the amount on any one bill."""
+    return load_overlay()["prices"].get(panel, "")
+
+
+def set_price(panel: str, price: str) -> None:
+    overlay = load_overlay()
+    price = (price or "").strip()
+    if price:
+        overlay["prices"][panel] = price
+    else:
+        overlay["prices"].pop(panel, None)
+    save_overlay(overlay)
 
 
 def is_builtin(panel: str) -> bool:
@@ -178,6 +200,8 @@ def rename_panel(old: str, new: str) -> None:
     else:
         overlay["custom"].pop(old, None)
     overlay["custom"][new] = rows
+    if old in overlay["prices"]:
+        overlay["prices"][new] = overlay["prices"].pop(old)
     overlay["order"] = [new if n == old else n for n in overlay["order"]]
     _remember_order(overlay, new)
     save_overlay(overlay)
@@ -192,6 +216,7 @@ def delete_panel(panel: str) -> None:
     else:
         overlay["custom"].pop(panel, None)
     overlay["order"] = [n for n in overlay["order"] if n != panel]
+    overlay["prices"].pop(panel, None)
     save_overlay(overlay)
 
 

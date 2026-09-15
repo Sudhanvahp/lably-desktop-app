@@ -51,8 +51,6 @@ DEFAULT_BILL_TYPE = BILL_TYPES[0]
 # edits them to suit, and clearing the box and saving prints no notes at all.
 DEFAULT_BILL_NOTES = "\n".join((
     "Please bring receipt while collecting the report",
-    "Beyond 01 month reports will not be preserved",
-    "All culture reports after 3-4 days",
     "Working Hours : Weekdays : 7.00 am to 9.00 pm  Sundays / Holidays : "
     "7.00 am to 1.00 pm",
 ))
@@ -156,8 +154,15 @@ def sync_items(billing: Billing, rows: List[Any]) -> List[BillItem]:
     bill moves.
     """
     priced = {item.service: item.amount for item in billing.items}
-    return [BillItem(service=name, amount=priced.get(name, ""))
+    return [BillItem(service=name, amount=priced.get(name, default_price(name)))
             for name in billable_services(rows)]
+
+
+def default_price(service: str) -> str:
+    """What a freshly added service line starts at: the panel's standing
+    charge from Test Templates, or blank when none is set."""
+    from . import templates   # local: templates imports storage, storage imports billing
+    return templates.price_for(service)
 
 
 # --------------------------------------------------------------------------

@@ -19,7 +19,15 @@ class SerialNumberTests(SandboxCase):
         ids = [self.storage.save_report(self.make_report(f"P{i}")).patient_id
                for i in range(5)]
         self.assertEqual(len(set(ids)), 5)
-        self.assertEqual(ids[0], "PID-000001")
+        self.assertEqual(ids[0], "HFCD-000001")
+
+    def test_ids_handed_out_as_pid_still_occupy_their_numbers(self):
+        """Reports made before the HFCD prefix keep their PID and the new
+        sequence carries on after them rather than restarting at 1."""
+        old = self.make_report("Old")
+        old.patient_id = "PID-000041"
+        self.storage.save_report(old)
+        self.assertEqual(self.storage.peek_patient_id(), "HFCD-000042")
 
     def test_peek_does_not_consume_a_number(self):
         first = self.storage.peek_report_no()
@@ -474,3 +482,35 @@ class BackupTests(SandboxCase):
         self.assertEqual(self.storage.backup_month_dir(folder, report),
                          os.path.join(folder, f"{datetime.now():%Y}",
                                       f"{datetime.now():%m-%B}"))
+
+
+class ReportIdTests(SandboxCase):
+    def test_a_burst_of_saves_in_one_second_never_collides(self):
+        ids = {self.storage.new_report_id() for _ in range(500)}
+        self.assertEqual(len(ids), 500)
+
+    def test_an_id_already_on_disk_is_never_handed_out_again(self):
+        import uuid
+        fixed = "deadbeef"
+        original = uuid.uuid4
+        calls = {"n": 0}
+
+        class Fake:
+            hex = fixed * 4
+
+        def fake_uuid4():
+            calls["n"] += 1
+            return Fake() if calls["n"] == 1 else original()
+        report = self.storage.save_report(self.make_report())
+        report.id = ""   # force a fresh id next time
+        uuid.uuid4 = fake_uuid4
+        try:
+            taken = self.storage.new_report_id()
+            self.assertTrue(taken.endswith(fixed))
+            with open(os.path.join(self.storage.reports_dir(), taken + ".json"), "w") as fh:
+                fh.write("{}")
+            calls["n"] = 0
+            fresh = self.storage.new_report_id()
+        finally:
+            uuid.uuid4 = original
+        self.assertNotEqual(fresh, taken)

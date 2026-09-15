@@ -342,6 +342,15 @@ QTableWidget#GridTable QHeaderView::section {{
     padding: 9px 8px;
 }}
 QTableWidget#GridTable QHeaderView::section:last {{ border-right: none; }}
+/* the serial number down the side of the results and bill grids */
+QTableWidget#GridTable QHeaderView::section:vertical {{
+    color: {MUTED};
+    font-weight: 400;
+    padding: 0 8px;
+    min-width: 30px;
+    border-right: 2px solid {GRID_LINE};
+    border-bottom: 1px solid {GRID_LINE};
+}}
 
 /* ------------------------------------------------------------------ lists */
 QListWidget {{
