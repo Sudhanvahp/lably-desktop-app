@@ -151,7 +151,7 @@ class SettingsView(QWidget):
         self.bill_notes.setPlaceholderText(
             "One note per line, e.g.\n"
             "Please bring receipt while collecting the report\n"
-            "Beyond 01 month reports will not be preserved")
+            "Working Hours : Weekdays : 7.00 am to 9.00 pm")
         # The standard terms are one click away rather than magically appearing
         # whenever the box is empty. Prefilling on every blank would mean a lab
         # could never keep the notes cleared: the moment they saved anything

@@ -51,8 +51,6 @@ DEFAULT_BILL_TYPE = BILL_TYPES[0]
 # edits them to suit, and clearing the box and saving prints no notes at all.
 DEFAULT_BILL_NOTES = "\n".join((
     "Please bring receipt while collecting the report",
-    "Beyond 01 month reports will not be preserved",
-    "All culture reports after 3-4 days",
     "Working Hours : Weekdays : 7.00 am to 9.00 pm  Sundays / Holidays : "
     "7.00 am to 1.00 pm",
 ))

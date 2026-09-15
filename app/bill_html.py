@@ -8,8 +8,8 @@ neither document can quietly acquire the other's furniture.
 The layout reproduces the slip the lab already issues, field for field and rule
 for rule: centred letterhead, the bill type as the heading, a two-column block of
 patient and bill identity, a fully ruled services table with Amount and Net
-Amount, the paid amount in words beside the closing figures, the Printed By /
-Billed By pair, and the numbered notes.
+Amount, the paid amount in words beside the closing figures, a Billed By
+line to fill in, and the numbered notes.
 
 It is deliberately monochrome. The report is a clinical document and carries the
 lab's colours; a bill is an accounting document that gets photocopied, faxed and
@@ -32,7 +32,7 @@ PAPER = "#ffffff"
 
 # Column widths, shared by the services table and the block beneath it so the
 # closing figures line up under the money columns instead of merely near them.
-W_SERIAL, W_SERVICE, W_AMOUNT, W_NET = "5%", "55%", "20%", "20%"
+W_SERIAL, W_SERVICE, W_AMOUNT, W_NET = "9%", "51%", "20%", "20%"
 
 AGE_WORDS = {"Y": "Yrs", "M": "Mths", "D": "Days"}
 SEX_WORDS = {"M": "Male", "F": "Female"}
@@ -133,7 +133,7 @@ def _identity(r: Report) -> str:
     # column it lives in over the top of its neighbour.
     left: List[Tuple[str, str, bool, bool]] = [
         ("Patient Name", r.display_name(), True, False),
-        ("Patient No", r.patient_id, False, True),
+        ("Patient ID", r.patient_id, False, True),
         ("Age/Gender", _age_sex(r), True, True),
         ("Phone No", r.phone, True, True),
     ]
@@ -187,7 +187,7 @@ def _services(r: Report) -> str:
     """
     rows = [
         "<tr>"
-        f'<td width="{W_SERIAL}" align="center" class="th">#</td>'
+        f'<td width="{W_SERIAL}" align="center" class="th">Sl. No.</td>'
         f'<td width="{W_SERVICE}" class="th">Services</td>'
         f'<td width="{W_AMOUNT}" align="center" class="th">Amount</td>'
         f'<td width="{W_NET}" align="center" class="th">Net Amount</td>'
@@ -274,11 +274,32 @@ def _amount_words(r: Report) -> str:
     )
 
 
-def _signatories(r: Report) -> str:
-    """The slip no longer names who printed or billed it: the lab asked for the
-    field to go. Bills stored with a name keep it in the data file; nothing
-    prints. Kept as a function so the page assembly below stays readable."""
-    return ""
+def _billed_by(r: Report, lab: LabProfile) -> str:
+    """The 'Billed By' line, right of the notes at the foot of the slip.
+
+    It is a placeholder first: the counter writes the name in by hand, so the
+    line is a ruled blank unless a name is already on record - one stored with
+    the bill, or the lab's default from the profile - in which case it prints.
+    The blank is a one-pixel filled cell under an empty one, the same way every
+    other rule on the bill is drawn, because Qt draws no underline of its own.
+    """
+    name = escape(r.billing.billed_by or lab.billed_by)
+    if name:
+        shown = f'<b>{name}</b>'
+    else:
+        shown = (
+            '<table width="100%" cellspacing="0" cellpadding="0">'
+            '<tr><td style="font-size:7px; line-height:7px;">&nbsp;</td></tr>'
+            f'<tr><td bgcolor="{INK}" height="1" '
+            'style="font-size:1px; line-height:1px;">&nbsp;</td></tr></table>'
+        )
+    return _plain(
+        "<tr>"
+        '<td class="key">Billed By</td>'
+        '<td class="colon">:</td>'
+        f'<td width="100%" class="val">{shown}</td>'
+        "</tr>"
+    )
 
 
 def _notes(lab: LabProfile) -> str:
@@ -294,11 +315,25 @@ def _notes(lab: LabProfile) -> str:
     return f'<div class="notehead">Note:</div>{items}'
 
 
+def _foot_block(r: Report, lab: LabProfile) -> str:
+    """Notes on the left, Billed By on the right, sharing one band.
+
+    Side by side rather than stacked because an A5 slip has no row to spare:
+    a full-width Billed By line above the notes was what pushed the footer of
+    a three-line bill onto a second sheet."""
+    return _plain(
+        "<tr>"
+        f'<td width="70%" valign="top" style="padding-right:12px;">{_notes(lab)}</td>'
+        f'<td width="30%" valign="bottom">{_billed_by(r, lab)}</td>'
+        "</tr>"
+    )
+
+
 CSS = f"""
 body {{ font-family: Arial, 'Helvetica Neue', 'Segoe UI', sans-serif;
         font-size: 7pt; color: {INK}; }}
-.labname {{ font-size: 12pt; font-weight: bold; }}
-.labsub {{ font-size: 8pt; }}
+.labname {{ font-size: 17pt; font-weight: bold; letter-spacing: 0.5px; }}
+.labsub {{ font-size: 10.5pt; }}
 .labline {{ font-size: 6.5pt; }}
 .heading {{ font-size: 8.5pt; font-weight: bold; }}
 /* Every fixed-format cell is nowrap. A printer page is laid out at the
@@ -360,13 +395,7 @@ def build(report: Report, lab: LabProfile) -> str:
         _band(_closing(report), top=3),
     ]
 
-    signatories = _signatories(report)
-    if signatories:
-        bands.append(_band(signatories, top=6))
-
-    notes = _notes(lab)
-    if notes:
-        bands.append(_band(notes, top=5))
+    bands.append(_band(_foot_block(report, lab), top=5))
 
     foot = footer(lab)
     if foot:

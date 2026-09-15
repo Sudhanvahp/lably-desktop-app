@@ -28,7 +28,8 @@ degrees, the **lab technician's name**, and pick a logo and the two signature im
 The report is deliberately plain - black type on white, thin rules, nothing bold except the
 patient's name - and sized so one full panel with its bill and signatures fits one A4 sheet.
 The address, contact details, timings and holidays print in the **footer**. The lab
-technician (left) and the pathologist (right) sign the foot of every report, on one line. Change anything in the profile and every report printed from then on carries
+technician (left) and the pathologist (right) sign the foot of every report, on one
+line, each with a clear space above the name to sign in and no rule. Change anything in the profile and every report printed from then on carries
 the new details. A live preview shows the letterhead
 exactly as it will print. Chosen images are copied into the app's own `assets` folder, so the report keeps
 working even if you later move or delete the originals.
@@ -57,7 +58,8 @@ working even if you later move or delete the originals.
    red while anything is owed and green once it is settled. Leave it all blank and
    nothing about the report changes. **Preview Bill / Bill PDF / Print Bill** on that
    card produce the patient's bill as a document of its own.
-6. **Print Preview**, **Export PDF**, or **Save and Print** (which always saves first,
+6. **Print Preview** (with Zoom In / Zoom Out / Fit Page / Fit Width buttons, or
+   `Ctrl +`, `Ctrl -`, `Ctrl 0`), **Export PDF**, or **Save and Print** (which always saves first,
    so nothing is printed that isn't in the history).
 
 Reference ranges for Haemoglobin, RBC, PCV, ESR, HDL, Creatinine and Uric Acid are
@@ -74,7 +76,10 @@ the New Report page and feeds both:
   in that card's header, and `Ctrl+B` prints one from anywhere.
 * **The Bill Summary block inside the report** - the same figures, compactly, under
   the results and after the remarks, before *End of Report*, so it can never sit on
-  top of a laboratory value.
+  top of a laboratory value. It is optional: the report prints clean unless
+  **Attach bill summary to report** is ticked (on the form's action bar, and again
+  in History for reprints), so the lab report and the bill go out as two separate
+  documents by default and as one sheet on request.
 
 The bill is laid out in [app/bill_html.py](app/bill_html.py), separately from
 [app/report_html.py](app/report_html.py). Keeping them apart is what stops either
@@ -90,12 +95,12 @@ document quietly acquiring the other's furniture.
 |                             Cash Bill                                    |
 |--------------------------------------------------------------------------|
 | Patient Name : Mr. PRASANNA C N    Bill No   : 416385                    |
-| Patient No   : 147634              Bill Date : 30-Aug-2026 10.43.30 AM   |
+| Patient ID   : 147634              Bill Date : 30-Aug-2026 10.43.30 AM   |
 | Age/Gender   : 67 Yrs / Male       Bill Type : Cash Bill                 |
 | Phone No     : 9620055441          Doctor    : Dr. RAVIKUMAR KULKARNI    |
 |--------------------------------------------------------------------------|
 | +---+--------------------------------+-----------+--------------------+  |
-| | # | Services                       |   Amount  |     Net Amount     |  |
+| | Sl. No. | Services                 |   Amount  |     Net Amount     |  |
 | | 1 | USG-Abdomen & Pelvic Scan      |    950.00 |             950.00 |  |
 | | 2 | URINE ROUTINE                  |     90.00 |              90.00 |  |
 | |          Total Billed              |  1,040.00 |           1,040.00 |  |
@@ -108,9 +113,7 @@ document quietly acquiring the other's furniture.
 |                                                                          |
 | Note:                                                                    |
 | 1.  Please bring receipt while collecting the report                     |
-| 2.  Beyond 01 month reports will not be preserved                        |
-| 3.  All culture reports after 3-4 days                                   |
-| 4.  Working Hours : Weekdays : 7.00 am to 9.00 pm ...                    |
+| 2.  Working Hours : Weekdays : 7.00 am to 9.00 pm ...                    |
 +--------------------------------------------------------------------------+
 ```
 
@@ -148,10 +151,12 @@ The two identity columns are separate tables inside a 50/50 shell, because in on
 six-column table a long doctor's name on the right narrows the patient's name on
 the left until it wraps.
 
-The heading is always *Cash Bill*: the bill-type choice and the Printed By /
-Billed By names were removed at the lab's request. A bill stored by an earlier
-build with another type or a clerk's name keeps them in its data file; the type
-still titles that bill when reprinted, the name never prints.
+The heading is always *Cash Bill*: the bill-type choice was removed at the lab's
+request, and a bill stored by an earlier build with another type keeps it and is
+still titled by it when reprinted. A **Billed By** line sits at the bottom right of
+the slip. It is a placeholder - a ruled blank for the counter to write a name on -
+unless a name is on record (stored with the bill, or the profile's default), in
+which case that name prints.
 
 One deviation, deliberate: the lab's slip prints the fourth column header as
 **Net Am** where the word is cut short. This prints **Net Amount**. Everything

@@ -825,6 +825,15 @@ class ReportForm(QWidget):
         row.addWidget(clear)
         row.addStretch(1)
 
+        # The lab report and the bill are two documents. Off, the report prints
+        # clean and the bill goes out as its own slip from the card above; on,
+        # the bill summary is attached under the results for one-sheet handouts.
+        self.attach_bill = QCheckBox("Attach bill summary to report")
+        self.attach_bill.setToolTip(
+            "Print the bill summary under the results. Leave it off to keep the "
+            "lab report and the bill as separate documents.")
+        row.addWidget(self.attach_bill)
+
         for icon_name, text, tip, slot in (
             ("save", "Save", "Save without printing", self.save),
             ("preview", "Print Preview", "See the report before printing", self.preview),
@@ -1385,7 +1394,8 @@ class ReportForm(QWidget):
         return ""
 
     def _html(self) -> str:
-        return build(self.collect(), storage.load_profile())
+        return build(self.collect(), storage.load_profile(),
+                     with_bill=self.attach_bill.isChecked())
 
     def preview(self):
         if self._validate():

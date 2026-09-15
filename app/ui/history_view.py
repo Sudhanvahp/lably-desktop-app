@@ -112,7 +112,7 @@ class HistoryView(QWidget):
         table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         table.setAlternatingRowColors(True)
         table.setShowGrid(False)
-        table.verticalHeader().setVisible(False)
+        table.verticalHeader().setVisible(True)   # Sl. No. down the side
         table.verticalHeader().setDefaultSectionSize(38)
         table.horizontalHeader().setSectionResizeMode(CHECK, QHeaderView.Fixed)
         table.setColumnWidth(CHECK, 58)
@@ -143,6 +143,13 @@ class HistoryView(QWidget):
         row.addWidget(self.delete_selected_btn)
 
         row.addStretch(1)
+        # Same switch as the form: a reprint is the lab report alone unless
+        # the operator asks for the bill summary on the same sheet.
+        self.attach_bill = QCheckBox("Attach bill summary")
+        self.attach_bill.setToolTip(
+            "Print the bill summary under the results when previewing, "
+            "exporting or reprinting")
+        row.addWidget(self.attach_bill)
         for icon_name, text, tip, slot, kind in (
             ("copy", "Duplicate", "Same patient, blank results", self.duplicate_selected, "Danger"),
             ("preview", "Preview", "See it before printing", self.preview_selected, ""),
@@ -273,7 +280,8 @@ class HistoryView(QWidget):
         return report
 
     def _html(self, report):
-        return build(report, storage.load_profile())
+        return build(report, storage.load_profile(),
+                     with_bill=self.attach_bill.isChecked())
 
     # --------------------------------------------------------------- actions
     def open_selected(self):

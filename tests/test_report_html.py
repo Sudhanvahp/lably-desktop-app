@@ -69,6 +69,17 @@ class ContentTests(unittest.TestCase):
         self.assertNotIn("<b>H</b>", html)
         self.assertNotIn("<b>L</b>", html)
 
+    def test_the_bill_summary_can_be_left_off(self):
+        """The bill is its own document too, so the report can print without it."""
+        billed = sample_report(billing=Billing(
+            bill_no="CB-1", items=[BillItem("CBC", "400")]))
+        self.assertIn("BILL SUMMARY", build(billed, sample_profile()))
+        self.assertIn("BILL SUMMARY", build(billed, sample_profile(), with_bill=True))
+        clean = build(billed, sample_profile(), with_bill=False)
+        self.assertNotIn("BILL SUMMARY", clean)
+        self.assertNotIn("400.00", clean)
+        self.assertIn("End of Report", clean)
+
     def test_end_of_report_marker(self):
         self.assertIn("End of Report", self.html)
 
@@ -310,8 +321,8 @@ class LetterheadTests(unittest.TestCase):
         self.assertIn('<div class="labname" align="center">Hemavathi</div>', html)
         self.assertIn('<div class="labsub" align="center">Family Clinic</div>', html)
         self.assertLess(html.index("Hemavathi"), html.index("Family Clinic"))
-        self.assertIn(".labname { font-size: 14pt; font-weight: bold; color: #1a4fa3", CSS)
-        self.assertIn(".labsub { font-size: 9.5pt; color: #1a4fa3", CSS)
+        self.assertIn(".labname { font-size: 18pt; font-weight: bold; color: #1a4fa3", CSS)
+        self.assertIn(".labsub { font-size: 11.5pt; color: #1a4fa3", CSS)
 
     def test_no_sub_heading_prints_no_empty_line(self):
         self.assertNotIn("labsub", letterhead(sample_profile()))
@@ -369,27 +380,43 @@ class SignatoryTests(unittest.TestCase):
         names = html[html.index('class="signname"'):]
         self.assertLess(names.index("S. Kumar"), names.index("Dr. A. Rao"))
 
-    def test_nobody_is_named_as_billed_by(self):
-        report = sample_report(billing=Billing(billed_by="Miss. Nethra"))
-        html = build(report, sample_profile(technician="S. Kumar"))
-        self.assertNotIn("Billed By", html)
-        self.assertNotIn("Miss. Nethra", html)
-
-    def test_all_three_names_sit_in_one_table_row(self):
-        """One row holds all the names, so they are level by construction."""
+    def test_both_names_sit_in_one_table_row(self):
+        """One row holds both names, so they are level by construction."""
         html = build(sample_report(), sample_profile(technician="S. Kumar"))
         row = re.search(r"<tr>((?:(?!</tr>).)*S\. Kumar(?:(?!</tr>).)*)</tr>", html).group(1)
         self.assertIn("Dr. A. Rao", row)
 
     def test_roles_are_named(self):
         html = build(sample_report(), sample_profile(technician="S. Kumar"))
-        for role in ("Lab Technician", "Pathologist"):
+        for role in ("Lab Technician", "Pathologist, MD"):
             self.assertIn(role, html)
 
-    def test_missing_people_leave_blank_slots(self):
+    def test_nobody_is_named_as_billed_by(self):
+        report = sample_report(billing=Billing(billed_by="Miss. Nethra"))
+        html = build(report, sample_profile(technician="S. Kumar"))
+        self.assertNotIn("Billed By", html)
+        self.assertNotIn("Miss. Nethra", html)
+
+    def test_no_rule_above_the_names_and_room_to_sign(self):
+        """The lab signs by hand: the names have a clear space above them and
+        no line - the End of Report rule is the last one on the page."""
+        from app.report_html import SIGN_SPACE_PT
+        html = build(sample_report(), sample_profile(technician="S. Kumar"))
+        block = html[html.index("End of Report"):]
+        block = block[block.index("</table>"):]          # past the end marker
+        self.assertNotIn("bgcolor", block[:block.index('class="signname"')])
+        self.assertIn(f"font-size:{SIGN_SPACE_PT}pt", block)
+
+    def test_missing_names_still_print_their_titles(self):
+        """A blank profile still gets both slots, titled, to sign against."""
         html = build(sample_report(), sample_profile())
-        self.assertNotIn("Lab Technician", html)
+        self.assertIn("Lab Technician", html)
         self.assertIn("Dr. A. Rao", html)
+        empty = build(sample_report(), sample_profile(pathologist="",
+                                                     pathologist_degrees=""))
+        self.assertIn("Lab Technician", empty)
+        self.assertIn("Pathologist", empty)
+        self.assertNotIn("Dr. A. Rao", empty)
 
     def test_names_are_escaped(self):
         html = build(sample_report(), sample_profile(technician="<i>x</i>"))

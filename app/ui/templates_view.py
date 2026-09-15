@@ -104,7 +104,7 @@ class TemplatesView(QWidget):
 
         self.table = QTableWidget(0, len(COLS))
         self.table.setHorizontalHeaderLabels(COLS)
-        self.table.verticalHeader().setVisible(False)
+        self.table.verticalHeader().setVisible(True)   # Sl. No. down the side
         self.table.verticalHeader().setDefaultSectionSize(32)
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.setAlternatingRowColors(True)

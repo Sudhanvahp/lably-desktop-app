@@ -1541,6 +1541,7 @@ class BillingFormTests(UICase):
         self.fill()
         self.price(CBC, "400")
         self.form.f_deposit.setText("250")
+        self.form.attach_bill.setChecked(True)
         html = self.form._html()
         self.assertIn("BILL SUMMARY", html)
         self.assertIn("400.00", html)
@@ -1557,7 +1558,10 @@ class BillingFormTests(UICase):
         from app.report_html import build
 
         self.assertEqual(self.form._html(),
-                         build(report, self.storage.load_profile()))
+                         build(report, self.storage.load_profile(), with_bill=False))
+        self.form.attach_bill.setChecked(True)
+        self.assertEqual(self.form._html(),
+                         build(report, self.storage.load_profile(), with_bill=True))
 
     def test_a_report_with_no_amounts_prints_no_bill_section(self):
         self.fill()
@@ -1752,10 +1756,13 @@ class BillDocumentTests(UICase):
         with open(path, "rb") as fh:
             self.assertTrue(fh.read(4).startswith(b"%PDF"))
 
-    def test_the_report_still_prints_its_own_summary_block(self):
-        """The two documents coexist; adding the bill did not remove the block
-        the change request asked for inside the report."""
+    def test_the_report_prints_clean_unless_the_bill_is_attached(self):
+        """The two documents are separate by default: the report prints without
+        the bill summary, and the tickbox puts it back on the same sheet."""
         self.billed(deposit="150")
+        self.assertFalse(self.form.attach_bill.isChecked())
+        self.assertNotIn("BILL SUMMARY", self.form._html())
+        self.form.attach_bill.setChecked(True)
         self.assertIn("BILL SUMMARY", self.form._html())
 
 
@@ -1788,14 +1795,14 @@ class BillFieldTests(UICase):
         self.assertEqual(self.form._collect_billing().bill_type, "Credit Bill")
         self.assertIn("Credit Bill", self.form._bill_html())
 
-    def test_there_is_no_billed_by_field(self):
+    def test_there_is_no_billed_by_field_but_the_bill_has_a_blank_for_it(self):
         self.assertFalse(hasattr(self.form, "f_billed_by"))
         self.billed()
         self.assertEqual(self.form._collect_billing().billed_by, "")
-        self.assertNotIn("Billed By", self.form._bill_html())
+        self.assertIn("Billed By", self.form._bill_html())
         self.assertNotIn("Billed By", self.form._html())
 
-    def test_a_stored_billed_by_name_survives_a_resave_unseen(self):
+    def test_a_stored_billed_by_name_survives_a_resave_and_prints(self):
         self.billed()
         self.form.save()
         report = self.storage.load_report(self.form.current_id)
@@ -1804,7 +1811,7 @@ class BillFieldTests(UICase):
         self.form.new_report()
         self.form.load_report(self.storage.load_report(report.id))
         self.assertEqual(self.form._collect_billing().billed_by, "Miss. Nethra H M")
-        self.assertNotIn("Miss. Nethra H M", self.form._bill_html())
+        self.assertIn("Miss. Nethra H M", self.form._bill_html())
 
     def test_the_bill_date_carries_a_time(self):
         self.billed()
@@ -1852,14 +1859,14 @@ class BillFieldTests(UICase):
         self.storage.save_profile(LabProfile(
             lab_name="Test Lab", mobile="9964725222",
             bill_notes="Please bring receipt while collecting the report\n"
-                       "Beyond 01 month reports will not be preserved"))
+                       "Working Hours : 7.00 am to 9.00 pm"))
         self.form.new_report()
         self.billed()
         html = self.form._bill_html()
         self.assertIn("Mob: 9964725222", html)
         self.assertIn("Note:", html)
         self.assertIn("Please bring receipt while collecting the report", html)
-        self.assertIn("Beyond 01 month reports will not be preserved", html)
+        self.assertIn("Working Hours : 7.00 am to 9.00 pm", html)
 
 
 class LabProfileBillFieldTests(UICase):
@@ -2036,8 +2043,6 @@ class BillLayoutTests(UICase):
             address2="Opp. CORPORATION BANK KUVEMPUNAGAR, MYSURU-570023",
             phone="08212529999", mobile="9964725222",
             bill_notes="Please bring receipt while collecting the report\n"
-                       "Beyond 01 month reports will not be preserved\n"
-                       "All culture reports after 3-4 days\n"
                        "Working Hours : Weekdays : 7.00 am to 9.00 pm "
                        "Sundays /Holidays : 7.00 am to 1.00 pm")
 

@@ -363,21 +363,28 @@ class _Signatory:
         return bool(self.image or self.name)
 
 
+# Height of the blank left above each name for a handwritten signature, in
+# points. A signature image, when one is set, prints at the same height so the
+# block is the same size either way.
+SIGN_SPACE_PT = 34
+
+
 def _signature(lab: LabProfile, r: Report) -> str:
     """Two signatories across the foot of the page: the lab technician who ran
     the tests on the left, the pathologist who vouches for the result on the
-    right.
+    right. Each is a clear space to sign in, then the name, then the role.
 
-    Laid out as one table with a row per element (image, rule, name, role)
-    rather than three stacked blocks: Qt ignores valign, so this is the one
-    way to guarantee all three names and rules sit on the same line."""
+    Both slots always print, role and all, even with no name in the profile:
+    the space and the title are the placeholder the person signs against by
+    hand. There is no rule above the names - the lab signs by hand and asked
+    for the line to go. Laid out as one table with a row per element (space,
+    name, role) rather than two stacked blocks: Qt ignores valign, so this is
+    the one way to guarantee both names sit on the same line."""
     people = [
         _Signatory(lab.technician_signature_path, lab.technician, "", "Lab Technician"),
         _Signatory(lab.signature_path, lab.pathologist, lab.pathologist_degrees,
                    "Pathologist"),
     ]
-    if not any(p.present() for p in people):
-        return ""
 
     def cell(content: str, cls: str = "") -> str:
         return f'<td align="center" width="50%" class="{cls}">{content}</td>'
@@ -385,27 +392,18 @@ def _signature(lab: LabProfile, r: Report) -> str:
     def row(cells: List[str]) -> str:
         return "<tr>" + "".join(cells) + "</tr>"
 
-    # A short line under each name. The rule cell is flanked by two empty
-    # cells so it sits centred at a fixed width - Qt ignores align on tables.
-    signline = (
-        '<table width="100%" cellspacing="0" cellpadding="0"><tr>'
-        f'<td width="20%" style="{_bar(1)}">&nbsp;</td>'
-        f'<td width="60%" bgcolor="{RULE_SOFT}" height="1" style="{_bar(1)}">&nbsp;</td>'
-        f'<td width="20%" style="{_bar(1)}">&nbsp;</td></tr></table>'
-    )
     blank = "&nbsp;"
-    images = row([cell(f'<img src="{p.image}" height="28">' if p.image else _spacer(16))
-                  for p in people])
-    rules = row([cell(signline if p.present() else blank) for p in people])
+    space = row([cell(f'<img src="{p.image}" height="{SIGN_SPACE_PT}">' if p.image
+                      else _spacer(SIGN_SPACE_PT))
+                 for p in people])
     names = row([cell(escape(p.name) if p.name else blank, "signname") for p in people])
     # Role and qualification share a line ("Pathologist, MD") so the block is
     # one row shorter - that row is what keeps a full panel on one sheet.
-    roles = row([cell(", ".join(x for x in (p.role if p.present() else "",
-                                            escape(p.degrees)) if x) or blank,
+    roles = row([cell(", ".join(x for x in (p.role, escape(p.degrees)) if x),
                       "signrole") for p in people])
     return (
         '<table width="100%" cellspacing="0" cellpadding="0">'
-        + images + rules + names + roles
+        + space + names + roles
         + "</table>"
     )
 
@@ -413,8 +411,8 @@ def _signature(lab: LabProfile, r: Report) -> str:
 CSS = f"""
 body {{ font-family: 'Segoe UI', Calibri, Arial, sans-serif; font-size: 8pt;
         color: {INK}; }}
-.labname {{ font-size: 14pt; font-weight: bold; color: {BRAND}; letter-spacing: 0.5px; }}
-.labsub {{ font-size: 9.5pt; color: {BRAND}; }}
+.labname {{ font-size: 18pt; font-weight: bold; color: {BRAND}; letter-spacing: 0.8px; }}
+.labsub {{ font-size: 11.5pt; color: {BRAND}; }}
 .sub {{ font-size: 7.5pt; color: {MUTED}; }}
 .doctitle {{ font-size: 9.5pt; color: {INK}; letter-spacing: 2px; }}
 .docmeta {{ font-size: 8.5pt; color: {INK}; }}
@@ -445,7 +443,13 @@ td.subhead {{ font-size: 7.5pt; color: {INK_SOFT}; letter-spacing: 1px; }}
 """
 
 
-def build(report: Report, lab: LabProfile) -> str:
+def build(report: Report, lab: LabProfile, with_bill: bool = True) -> str:
+    """The whole report as printable HTML.
+
+    `with_bill` decides whether the bill summary is attached under the results.
+    The bill is also a document of its own (see bill_html), so the lab can
+    hand out the report clean and the cash bill separately, or one sheet that
+    carries both."""
     body = [
         letterhead(lab),
         _spacer(2),
@@ -480,7 +484,7 @@ def build(report: Report, lab: LabProfile) -> str:
         body.append(_spacer(3))
         body.append(_remarks(report.remarks))
 
-    bill = _bill_summary(report)
+    bill = _bill_summary(report) if with_bill else ""
     if bill:
         body.append(_spacer(4))
         body.append(bill)

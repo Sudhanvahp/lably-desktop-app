@@ -31,7 +31,7 @@ def sample_profile(**kwargs):
                   address2="Opp. Corporation Bank, Mysuru-570023",
                   phone="08212529999", mobile="9964725222", reg_no="KA/DC/77",
                   bill_notes="Please bring receipt while collecting the report\n"
-                             "Beyond 01 month reports will not be preserved")
+                             "Working Hours : 7.00 am to 9.00 pm")
     fields.update(kwargs)
     return LabProfile(**fields)
 
@@ -72,7 +72,7 @@ class HeaderTests(unittest.TestCase):
 
     def test_the_patient_identity_block(self):
         for expected in ("Patient Name", "Mr. Prasanna C N",
-                         "Patient No", "147634",
+                         "Patient ID", "147634",
                          "Phone No", "9620055441"):
             self.assertIn(expected, self.html)
 
@@ -106,7 +106,7 @@ class ServiceTableTests(unittest.TestCase):
         self.html = build(sample_report(), sample_profile())
 
     def test_the_columns_match_the_slip(self):
-        for header in ("#", "Services", "Amount", "Net Amount"):
+        for header in ("Sl. No.", "Services", "Amount", "Net Amount"):
             self.assertIn(header, self.html)
 
     def test_the_table_is_fully_ruled_in_black(self):
@@ -195,13 +195,24 @@ class ClosingFigureTests(unittest.TestCase):
         words = html.index("Amount in Words")
         self.assertIn("One Thousand Forty Rupees Only", html[words:words + 200])
 
-    def test_the_bill_names_nobody_as_printed_or_billed_by(self):
-        """The field was removed; a name stored on an older bill stays in the
-        data file but never prints."""
-        html = build(sample_report(), sample_profile())
+    def test_the_bill_carries_a_billed_by_line(self):
+        """The counter fills the name in by hand, so with nothing on record the
+        line is a ruled blank rather than absent."""
+        html = build(sample_report(billing=sample_bill(billed_by="")),
+                     sample_profile(billed_by=""))
+        self.assertIn("Billed By", html)
         self.assertNotIn("Printed By", html)
-        self.assertNotIn("Billed By", html)
         self.assertNotIn("Miss. NETHRA H M", html)
+
+    def test_a_name_on_record_prints_on_the_billed_by_line(self):
+        html = build(sample_report(), sample_profile())
+        self.assertIn("Billed By", html)
+        self.assertIn("Miss. NETHRA H M", html)
+
+    def test_the_profile_default_fills_billed_by_when_the_bill_has_none(self):
+        html = build(sample_report(billing=sample_bill(billed_by="")),
+                     sample_profile(billed_by="R. Shetty"))
+        self.assertIn("R. Shetty", html)
 
 
 class NoteTests(unittest.TestCase):
@@ -211,18 +222,20 @@ class NoteTests(unittest.TestCase):
         self.assertIn("1.", html)
         self.assertIn("Please bring receipt while collecting the report", html)
         self.assertIn("2.", html)
-        self.assertIn("Beyond 01 month reports will not be preserved", html)
+        self.assertIn("Working Hours : 7.00 am to 9.00 pm", html)
 
     def test_the_standing_terms_are_offered_ready_made(self):
         """A lab should not have to invent them, and a bill printed on day one
         should not have an empty footer."""
         from app.billing import DEFAULT_BILL_NOTES
 
-        self.assertEqual(len(DEFAULT_BILL_NOTES.splitlines()), 4)
+        self.assertEqual(len(DEFAULT_BILL_NOTES.splitlines()), 2)
         html = build(sample_report(),
                      sample_profile(bill_notes=DEFAULT_BILL_NOTES))
         self.assertIn("Please bring receipt while collecting the report", html)
-        self.assertIn("4.", html)
+        self.assertIn("2.", html)
+        for gone in ("Beyond 01 month", "culture reports"):
+            self.assertNotIn(gone, html)
 
     def test_a_profile_with_no_notes_prints_none(self):
         html = build(sample_report(), sample_profile(bill_notes=""))
