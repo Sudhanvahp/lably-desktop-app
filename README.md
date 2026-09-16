@@ -21,14 +21,21 @@ Or just double-click **run.bat**.
 ## First use
 
 Open the **Laboratory Profile** tab (the app starts there until it's filled in) and enter the
-laboratory name and its **sub-heading** (e.g. "Family Clinic" - both print in blue, centred,
-at the top of every report), address, phone, email, registration number, **lab timings** and
-**holidays** (free text, optional - e.g. "Sundays & public holidays"), pathologist name and
+laboratory name and its **sub-heading** (e.g. "Family Clinic" - both print in blue, bold,
+in capitals and at the same size, ranged left at the top of every report, beside the logo;
+the bill keeps its centred letterhead), address, phone, email, registration number, **lab timings** and
+**holidays** (free text, optional - e.g. "Sundays & public holidays"), consultant pathologist's name and
 degrees, the **lab technician's name**, and pick a logo and the two signature images.
 The report is deliberately plain - black type on white, thin rules, nothing bold except the
 patient's name - and sized so one full panel with its bill and signatures fits one A4 sheet.
-The address, contact details, timings and holidays print in the **footer**. The lab
-technician (left) and the pathologist (right) sign the foot of every report, on one
+That one-sheet rule is what sets the page: the letterhead is set large, so the report prints
+to 6mm top and bottom margins and leaves about 10.6mm above each name to sign in. Anything
+further added to the letterhead has to be paid for out of one of those two.
+The address, contact details, timings and holidays print in the **footer**, set in a
+lighter blue under a light blue rule and pinned to the **foot of the sheet** - the app
+measures the laid-out page and fills the gap above it, so the footer sits on the bottom
+edge whether the report is one panel or five. The lab
+technician (left) and the **Consultant Pathologist** (right) sign the foot of every report, on one
 line, each with a clear space above the name to sign in and no rule. Change anything in the profile and every report printed from then on carries
 the new details. A live preview shows the letterhead
 exactly as it will print. Chosen images are copied into the app's own `assets` folder, so the report keeps
@@ -480,6 +487,17 @@ The report prints A4 portrait; the bill prints A5 landscape, half an A4 sheet.
 Each document's page setup is used for preview, printer and PDF alike, so all
 three produce identical pages. Choosing "Microsoft Print to PDF" in the dialog is a good way
 to test without using paper.
+
+**Reports longer than one sheet** carry on properly. A panel that will not fit in what is
+left of a page is **moved whole onto the next one** rather than broken across the join, so
+a report never leaves a row or two of a panel stranded overleaf. A panel with more rows
+than fit on any page has to break, and when it does it takes its **panel name and column
+headings with it**, so a continued page never starts cold on a bare row. Either way the
+bill summary, the signatures and the footer follow the last row wherever it lands.
+
+Where the breaks fall is measured, not guessed: the app lays the page out, sees which
+panels straddle a boundary, moves those and lays it out again until they settle. The
+result is remembered, so scrolling and zooming the preview stays quick.
 
 ## Layout
 
