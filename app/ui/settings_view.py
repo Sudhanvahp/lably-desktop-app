@@ -91,7 +91,7 @@ class SettingsView(QWidget):
         ("reg_no", "Registration No."),
         ("timings", "Lab Timings"),
         ("holidays", "Holidays"),
-        ("pathologist", "Pathologist / Signatory"),
+        ("pathologist", "Consultant Pathologist / Signatory"),
         ("pathologist_degrees", "Degrees / Qualification"),
         ("technician", "Lab Technician"),
         ("footer_note", "Footer Note"),
@@ -179,7 +179,7 @@ class SettingsView(QWidget):
         for picker in (self.logo, self.signature, self.technician_signature):
             picker.changed.connect(self._refresh_preview)
         form.addRow("Logo:", self.logo)
-        form.addRow("Pathologist Signature:", self.signature)
+        form.addRow("Consultant Pathologist Signature:", self.signature)
         form.addRow("Technician Signature:", self.technician_signature)
         form.addRow("Backup Folder:", self._build_backup_picker())
 

@@ -30,6 +30,11 @@ MUTED = "#555555"
 RULE = "#000000"
 RULE_SOFT = "#999999"
 BRAND = "#1a4fa3"          # the one colour on the page: the lab's own name
+# The footer is set in a lighter blue than the letterhead, under a rule of
+# the same family: it echoes the title without competing with it, and the
+# tint still prints legibly at 7.5pt on a mono laser.
+BRAND_SOFT = "#5b86c9"     # footer type
+RULE_BLUE = "#9dbbe4"      # the light blue rule above the footer
 FLAG = "#b00020"           # H / L marks only
 
 
@@ -62,8 +67,14 @@ def _rule(color: str = RULE, height: int = 1) -> str:
     )
 
 
-def _spacer(pt: int = 4) -> str:
+def _spacer(pt: float = 4) -> str:
     return f'<div style="font-size:{pt}pt;">&nbsp;</div>'
+
+
+# Qt's rich text has no `position: fixed`, so the footer cannot be pinned in
+# CSS. The document leaves this marker where the slack belongs and printing
+# measures the laid-out page and swaps in a spacer of exactly that height.
+FOOTER_PAD = "<!--footer-pad-->"
 
 
 def _keyed(pairs) -> str:
@@ -76,8 +87,11 @@ def _keyed(pairs) -> str:
 # letterhead and footer
 # --------------------------------------------------------------------------
 def letterhead(lab: LabProfile) -> str:
-    """The identity block at the top: name over sub-heading, centred, with
-    the logo off to the left. Contact details live in the footer."""
+    """The identity block at the top: name over sub-heading, both bold and in
+    capitals, ranged left beside the logo. Contact details live in the footer.
+
+    The capitals are applied here rather than in the stylesheet because Qt's
+    rich text has no `text-transform`."""
     logo = _data_uri(lab.logo_path)
     logo_cell = (
         f'<td width="80" valign="middle" style="padding-right:10px;">'
@@ -86,20 +100,20 @@ def letterhead(lab: LabProfile) -> str:
         else ""
     )
     lines: List[str] = [
-        f'<div class="labname" align="center">'
-        f'{escape(lab.lab_name or "LABORATORY NAME")}</div>'
+        f'<div class="labname" align="left">'
+        f'{escape((lab.lab_name or "Laboratory Name").upper())}</div>'
     ]
     if lab.lab_subtitle:
-        lines.append(f'<div class="labsub" align="center">{escape(lab.lab_subtitle)}</div>')
-    # The logo sits in a column of its own and an empty column of the same
-    # width balances it on the right, so the text block is centred on the page
-    # rather than on whatever room the logo leaves over.
-    balance = '<td width="80">&nbsp;</td>' if logo else ""
+        lines.append(
+            f'<div class="labsub" align="left">'
+            f'{escape(lab.lab_subtitle.upper())}</div>'
+        )
+    # Left-ranged, so the text takes whatever room the logo leaves over and no
+    # balancing column is needed on the right.
     return (
         '<table width="100%" cellpadding="0" cellspacing="0"><tr>'
         + logo_cell
-        + '<td valign="middle" align="center">' + "".join(lines) + "</td>"
-        + balance
+        + '<td valign="middle" align="left">' + "".join(lines) + "</td>"
         + "</tr></table>"
     )
 
@@ -123,7 +137,7 @@ def footer(lab: LabProfile) -> str:
     if not lines:
         return ""
     return (
-        _rule(RULE_SOFT, 1)
+        _rule(RULE_BLUE, 1)
         + '<div class="footer" align="center" style="padding-top:3px;">'
         + "<br>".join(lines)
         + "</div>"
@@ -191,25 +205,60 @@ def _tally(rows: List[TestRow]) -> Tuple[int, int]:
     return len(tests), len(flagged)
 
 
-def _panel_header(title: str) -> str:
-    """Panel title, ruled underneath."""
-    return (
-        '<table width="100%" cellspacing="0" cellpadding="2">'
-        f'<tr><td class="panel">{escape(title)}</td></tr></table>'
-        + _rule(RULE, 1)
-    )
+# The opening tag of a panel's results table, kept in one place because
+# printing rewrites it to move a panel onto a page of its own. The bill summary
+# is ruled the same way and so opens identically; `data-panel` is what tells
+# the two apart when printing counts them. Qt ignores the attribute.
+PANEL_TABLE_OPEN = ('<table width="100%" class="results" cellspacing="0" '
+                    'cellpadding="1" data-panel="yes"')
+
+# Qt honours page-break-before on a table.
+PAGE_BREAK = ' style="page-break-before:always"'
 
 
-def _rows_table(rows: List[TestRow], start: int = 1) -> Tuple[str, int]:
-    """Renders the rows; returns (html, next serial). Serial numbers run on
-    across panels so the last one is the count of tests on the report."""
+def panel_count(html: str) -> int:
+    """How many panel tables the report has."""
+    return html.count(PANEL_TABLE_OPEN)
+
+
+def with_page_breaks(html: str, indexes) -> str:
+    """The same report with the panels at `indexes` (0-based, in the order
+    they print) started on a fresh page.
+
+    Printing decides which those are - it is the only layer that knows where
+    the page boundaries fall - but the rewriting belongs here with the rest of
+    the HTML."""
+    if not indexes:
+        return html
+    parts = html.split(PANEL_TABLE_OPEN)
+    out = [parts[0]]
+    for i, part in enumerate(parts[1:]):
+        out.append(PANEL_TABLE_OPEN + (PAGE_BREAK if i in indexes else "") + part)
+    return "".join(out)
+
+
+def _rows_table(rows: List[TestRow], start: int = 1, title: str = "") -> Tuple[str, int]:
+    """One panel: its title and column headings over its rows, as a single
+    table. Returns (html, next serial). Serial numbers run on across panels so
+    the last one is the count of tests on the report.
+
+    The title and the column headings sit in a `<thead>` rather than in a block
+    of their own above the table. Qt repeats a table's header rows on every
+    page the table runs onto, so a panel that does not fit one sheet carries
+    its name and its column headings over to the next - and the title can never
+    be left stranded at the foot of a page with its rows overleaf, because it
+    is part of the table that breaks."""
     out = [
-        '<table width="100%" class="results" cellspacing="0" cellpadding="1">',
+        PANEL_TABLE_OPEN + ">",
+        "<thead>",
+        (f'<tr><td colspan="5" class="panel">{escape(title)}</td></tr>'
+         if title else ""),
         '<tr><th align="left" width="8%" style="white-space:nowrap;">Sl. No.</th>'
         '<th align="left" width="36%">Test</th>'
         '<th align="left" width="16%">Result</th>'
         '<th align="left" width="14%">Unit</th>'
         '<th align="left" width="26%">Reference Range</th></tr>',
+        "</thead>",
     ]
     serial = start
     for row in rows:
@@ -366,7 +415,12 @@ class _Signatory:
 # Height of the blank left above each name for a handwritten signature, in
 # points. A signature image, when one is set, prints at the same height so the
 # block is the same size either way.
-SIGN_SPACE_PT = 34
+#
+# Trimmed from 34pt (~12mm) to buy the room the full-size sub-heading needs;
+# 30pt is still about 10.6mm, comfortable for a signature. The sheet is full,
+# so anything added to the letterhead has to be paid for here or in the page
+# margins - see REPORT_PAGE in printing.py.
+SIGN_SPACE_PT = 30
 
 
 def _signature(lab: LabProfile, r: Report) -> str:
@@ -383,7 +437,7 @@ def _signature(lab: LabProfile, r: Report) -> str:
     people = [
         _Signatory(lab.technician_signature_path, lab.technician, "", "Lab Technician"),
         _Signatory(lab.signature_path, lab.pathologist, lab.pathologist_degrees,
-                   "Pathologist"),
+                   "Consultant Pathologist"),
     ]
 
     def cell(content: str, cls: str = "") -> str:
@@ -397,7 +451,7 @@ def _signature(lab: LabProfile, r: Report) -> str:
                       else _spacer(SIGN_SPACE_PT))
                  for p in people])
     names = row([cell(escape(p.name) if p.name else blank, "signname") for p in people])
-    # Role and qualification share a line ("Pathologist, MD") so the block is
+    # Role and qualification share a line ("Consultant Pathologist, MD") so it is
     # one row shorter - that row is what keeps a full panel on one sheet.
     roles = row([cell(", ".join(x for x in (p.role, escape(p.degrees)) if x),
                       "signrole") for p in people])
@@ -412,7 +466,7 @@ CSS = f"""
 body {{ font-family: 'Segoe UI', Calibri, Arial, sans-serif; font-size: 8pt;
         color: {INK}; }}
 .labname {{ font-size: 18pt; font-weight: bold; color: {BRAND}; letter-spacing: 0.8px; }}
-.labsub {{ font-size: 11.5pt; color: {BRAND}; }}
+.labsub {{ font-size: 18pt; font-weight: bold; color: {BRAND}; letter-spacing: 0.8px; }}
 .sub {{ font-size: 7.5pt; color: {MUTED}; }}
 .doctitle {{ font-size: 9.5pt; color: {INK}; letter-spacing: 2px; }}
 .docmeta {{ font-size: 8.5pt; color: {INK}; }}
@@ -423,6 +477,7 @@ body {{ font-family: 'Segoe UI', Calibri, Arial, sans-serif; font-size: 8pt;
 .panel {{ color: {INK}; font-size: 9pt; letter-spacing: 1px; }}
 table.results th {{ font-size: 7.5pt; font-weight: normal; color: {INK_SOFT};
                     border-bottom: 1px solid {RULE_SOFT}; }}
+table.results td.panel {{ border-bottom: 1px solid {RULE}; }}
 table.results td {{ border-bottom: 1px solid #e6e6e6; font-size: 8pt; }}
 .slno {{ color: {MUTED}; }}
 .tname {{ color: {INK}; }}
@@ -439,7 +494,7 @@ td.subhead {{ font-size: 7.5pt; color: {INK_SOFT}; letter-spacing: 1px; }}
 .end {{ font-size: 7.5pt; color: {MUTED}; letter-spacing: 2px; white-space: nowrap; }}
 .signname {{ font-size: 8.5pt; color: {INK}; }}
 .signrole {{ font-size: 7.5pt; color: {MUTED}; }}
-.footer {{ font-size: 7.5pt; color: {MUTED}; }}
+.footer {{ font-size: 7.5pt; color: {BRAND_SOFT}; }}
 """
 
 
@@ -452,9 +507,9 @@ def build(report: Report, lab: LabProfile, with_bill: bool = True) -> str:
     carries both."""
     body = [
         letterhead(lab),
-        _spacer(2),
+        _spacer(6),
         _title_bar(report),
-        _spacer(1),
+        _spacer(2),
         _patient_block(report),
     ]
 
@@ -471,8 +526,7 @@ def build(report: Report, lab: LabProfile, with_bill: bool = True) -> str:
     serial = 1
     for key in order:
         body.append(_spacer(3))
-        body.append(_panel_header(key))
-        table, serial = _rows_table(grouped[key], serial)
+        table, serial = _rows_table(grouped[key], serial, key)
         body.append(table)
 
     legend = _legend(report.rows)
@@ -481,20 +535,23 @@ def build(report: Report, lab: LabProfile, with_bill: bool = True) -> str:
         body.append(legend)
 
     if report.remarks:
-        body.append(_spacer(3))
+        body.append(_spacer(2))
         body.append(_remarks(report.remarks))
 
     bill = _bill_summary(report) if with_bill else ""
     if bill:
-        body.append(_spacer(4))
+        body.append(_spacer(2))
         body.append(bill)
 
-    body.append(_spacer(2))
+    body.append(_spacer(1))
     body.append(_end_marker())
     body.append(_signature(lab, report))
 
     foot = footer(lab)
     if foot:
+        # Everything above is set solid; the slack goes here, so the footer
+        # lands at the foot of the page.
+        body.append(FOOTER_PAD)
         body.append(_spacer(2))
         body.append(foot)
 
