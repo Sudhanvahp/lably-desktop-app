@@ -5,8 +5,8 @@ import unittest
 
 from app.billing import CURRENCY
 from app.models import BillItem, Billing, LabProfile, Report, TestRow
-from app.report_html import (BRAND_SOFT, CSS, FOOTER_PAD, RULE_BLUE, build,
-                             footer, letterhead, panel_count, with_page_breaks)
+from app.report_html import (CSS, FOOTER_PAD, build, footer, letterhead,
+                             panel_count, with_page_breaks)
 
 
 def sample_report(**kwargs):
@@ -120,7 +120,7 @@ class BillSummaryTests(unittest.TestCase):
 
     def test_the_bill_number_and_date_are_printed(self):
         self.assertIn("BILL-000001", self.html)
-        self.assertIn("01-Jan-2026 09.15.00 AM", self.html)
+        self.assertIn("01 Jan 2026", self.html)
 
     def test_the_date_reads_the_same_here_as_on_the_standalone_bill(self):
         """One bill quoted by two documents. They must not disagree about when it
@@ -129,7 +129,7 @@ class BillSummaryTests(unittest.TestCase):
 
         report = sample_report(billing=sample_bill())
         for html in (self.html, build_bill(report, sample_profile())):
-            self.assertIn("01-Jan-2026 09.15.00 AM", html)
+            self.assertIn("01 Jan 2026", html)
             self.assertNotIn("01-01-2026 09:15:00 AM", html)
 
     def test_every_billed_service_is_listed_with_its_amount(self):
@@ -278,9 +278,8 @@ class PlainDesignTests(unittest.TestCase):
     def test_no_coloured_bands_or_tints(self):
         body = self.html.split("</style>")[1]
         colours = set(re.findall(r'bgcolor="(#[0-9a-fA-F]{6})"', body))
-        # Only the rules themselves are painted - black and grey, plus the one
-        # light blue rule that separates the footer from the page.
-        self.assertTrue(colours <= {"#000000", "#999999", RULE_BLUE}, colours)
+        # only the rules themselves are painted, in black and grey
+        self.assertTrue(colours <= {"#000000", "#999999"}, colours)
 
     def test_headings_are_plain_black(self):
         self.assertIn("LABORATORY TEST REPORT", self.html)
@@ -302,12 +301,12 @@ class PanelContinuationTests(unittest.TestCase):
         self.html = build(sample_report(), sample_profile())
 
     def test_the_panel_title_is_a_header_row_of_its_own_table(self):
-        self.assertIn('<thead><tr><td colspan="5" class="panel">'
+        self.assertIn('<thead><tr><td colspan="4" class="panel" align="left">'
                       'Complete Blood Count (CBC)</td></tr>', self.html)
 
     def test_the_column_headings_are_in_the_same_header(self):
         head = self.html.split("<thead>")[1].split("</thead>")[0]
-        for column in ("Sl. No.", "Test", "Result", "Unit", "Reference Range"):
+        for column in ("Test", "Result", "Unit", "Reference Range"):
             self.assertIn(column, head)
 
     def test_the_rows_are_outside_the_header(self):
@@ -365,27 +364,37 @@ class PageBreakMarkupTests(unittest.TestCase):
 
 
 class SerialNumberTests(unittest.TestCase):
-    def test_tests_are_numbered_across_panels(self):
+    def test_the_results_table_has_no_serial_column(self):
         html = build(sample_report(), sample_profile())
-        for n in (1, 2, 3):
-            self.assertIn(f'<td class="slno">{n}</td>', html)
-        self.assertNotIn('<td class="slno">4</td>', html)
-        self.assertIn("Sl. No.", html)
+        results = html.split("BILL SUMMARY")[0]
+        self.assertNotIn("Sl. No.", results)
+        self.assertNotIn('class="slno"', results)
+        # The four columns that remain.
+        for column in ("Test", "Result", "Unit", "Reference Range"):
+            self.assertIn(column, results)
 
-    def test_headings_take_no_number(self):
+    def test_a_sub_heading_row_spans_the_whole_table(self):
         report = sample_report(rows=[
             TestRow("CBC", "DIFFERENTIAL", kind="heading"),
             TestRow("CBC", "Neutrophils", "60", "%", "40 - 75"),
         ])
         html = build(report, sample_profile())
-        self.assertIn('<td class="slno">1</td>', html)
-        self.assertNotIn('<td class="slno">2</td>', html)
+        self.assertIn('<tr><td colspan="4" class="subhead" align="left">'
+                      'DIFFERENTIAL</td></tr>', html)
+
+    def test_the_bill_keeps_its_numbering(self):
+        # Only the results table loses the column; a bill still numbers its
+        # lines, because that is what a patient checks a bill against.
+        report = sample_report(billing=Billing(items=[BillItem("CBC", "400")]))
+        html = build(report, sample_profile())
+        self.assertIn("Sl. No.", html.split("BILL SUMMARY")[1])
 
     def test_bill_lines_are_numbered(self):
         report = sample_report(billing=Billing(items=[
             BillItem("CBC", "400"), BillItem("Lipid Profile", "600")]))
         html = build(report, sample_profile())
-        self.assertIn('<td class="slno">2</td><td class="tname">Lipid Profile</td>', html)
+        self.assertIn('<td class="slno">2</td>'
+                      '<td class="tname" align="left">Lipid Profile</td>', html)
 
 
 class LetterheadTests(unittest.TestCase):
@@ -436,12 +445,10 @@ class LetterheadTests(unittest.TestCase):
         self.assertLess(build(sample_report(), profile).index("End of Report"),
                         build(sample_report(), profile).index("MG Road"))
 
-    def test_footer_is_light_blue_under_a_light_blue_rule(self):
+    def test_footer_is_black_under_a_black_rule(self):
         foot = footer(sample_profile(address1="MG Road"))
-        self.assertIn(f'bgcolor="{RULE_BLUE}"', foot)
-        self.assertIn(f".footer {{ font-size: 7.5pt; color: {BRAND_SOFT};", CSS)
-        # Lighter than the letterhead blue, so it reads as secondary.
-        self.assertNotEqual(BRAND_SOFT, "#1a4fa3")
+        self.assertIn('bgcolor="#000000"', foot)
+        self.assertIn(".footer { font-size: 7.5pt; color: #000000;", CSS)
 
     def test_the_slack_marker_sits_just_above_the_footer(self):
         # Printing swaps the marker for a measured spacer, which is what drops

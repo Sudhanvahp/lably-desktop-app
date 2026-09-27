@@ -1853,7 +1853,7 @@ class BillFieldTests(UICase):
         self.assertEqual(
             self.form.f_bill_date.dateTime().toString("dd-MM-yyyy"), "30-08-2026")
         self.assertEqual(self.form._collect_billing().bill_type, "Cash Bill")
-        self.assertIn("30-Aug-2026", self.form._bill_html())
+        self.assertIn("30 Aug 2026", self.form._bill_html())
 
     def test_the_profile_notes_reach_the_bill(self):
         self.storage.save_profile(LabProfile(
@@ -2419,7 +2419,8 @@ class ReportPageFitTests(UICase):
 
         self.assertGreater(doc.pageCount(), 1, "needs a report that spans pages")
         results = [f for f in doc.rootFrame().childFrames()
-                   if isinstance(f, QTextTable) and f.columns() == 5]
+                   if isinstance(f, QTextTable)
+                   and f.columns() == printing.PANEL_COLUMNS]
         self.assertEqual(len(results), len(panels))
         for table in results:
             # The title row and the column headings row - both repeated.
@@ -2514,7 +2515,7 @@ class ReportPaginationTests(UICase):
                         r.get("kind", "test"))
                 for p in (CBC, "Liver Function Test (LFT)")
                 for r in templates.rows_for(p)]
-        rows += [TestRow("new", f"New Test {i}", "", "", "") for i in range(6)]
+        rows += [TestRow("new", f"New Test {i}", "", "", "") for i in range(10)]
 
         raw, printed = self._layouts(rows, (CBC, "Liver Function Test (LFT)"))
         # Qt on its own breaks the last panel over the boundary ...
@@ -2550,3 +2551,155 @@ class ReportPaginationTests(UICase):
         self.assertGreater(pages, 1)
         for start, end in spans:
             self.assertEqual(start, end)
+
+
+class TextAppearanceTests(UICase):
+    """The Text Appearance panel on the laboratory profile.
+
+    The screen's contract is narrow and worth pinning down: one control moves
+    one region, the preview is the real renderer rather than a lookalike, and a
+    control put back where it started leaves nothing behind in the profile.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.settings = self.window.settings
+        self.editor = self.settings.style_editor
+        self.settings.edits["lab_name"].setText("Test Lab")
+
+    def pick(self, key):
+        keys = [slot.key for slot in self._slots()]
+        self.editor.picker.setCurrentIndex(keys.index(key))
+
+    @staticmethod
+    def _slots():
+        from app import text_style
+
+        return text_style.SLOTS
+
+    # ------------------------------------------------------------- collecting
+    def test_centring_a_region_stores_only_that_region(self):
+        self.pick("footer")
+        self.editor.align_buttons["left"].setChecked(True)
+        self.editor._collect()
+        self.assertEqual(self.editor.styles(), {"footer": {"align": "left"}})
+
+    def test_putting_a_control_back_stores_nothing(self):
+        self.pick("footer")
+        self.editor.align_buttons["left"].setChecked(True)
+        self.editor._collect()
+        self.editor.align_buttons["center"].setChecked(True)   # where it began
+        self.editor._collect()
+        self.assertEqual(self.editor.styles(), {})
+
+    def test_the_controls_open_showing_what_the_report_already_does(self):
+        self.pick("lab_name")
+        self.assertTrue(self.editor.effect_buttons["bold"].isChecked())
+        self.assertTrue(self.editor.align_buttons["left"].isChecked())
+        self.pick("footer")
+        self.assertFalse(self.editor.effect_buttons["bold"].isChecked())
+        self.assertTrue(self.editor.align_buttons["center"].isChecked())
+
+    def test_a_font_and_a_size_are_stored_together(self):
+        self.pick("lab_name")
+        self.editor.font_box.setCurrentIndex(
+            self.editor.font_box.findData("Georgia"))
+        self.editor.size_box.setCurrentIndex(
+            self.editor.size_box.findData("22"))
+        self.assertEqual(self.editor.styles()["lab_name"],
+                         {"font": "Georgia", "size": "22"})
+
+    def test_a_colour_is_stored_and_can_be_put_back(self):
+        self.pick("footer")
+        self.editor._set_color("#8b0000")
+        self.editor._collect()
+        self.assertEqual(self.editor.styles(), {"footer": {"color": "#8b0000"}})
+        self.editor._clear_color()
+        self.assertEqual(self.editor.styles(), {})
+
+    def test_resetting_one_region_leaves_the_others(self):
+        self.pick("footer")
+        self.editor.effect_buttons["italic"].setChecked(True)
+        self.editor._collect()
+        self.pick("lab_name")
+        self.editor.align_buttons["center"].setChecked(True)
+        self.editor._collect()
+
+        self.editor._reset_one()
+        self.assertEqual(list(self.editor.styles()), ["footer"])
+
+    def test_resetting_everything_clears_the_lot(self):
+        self.pick("footer")
+        self.editor.effect_buttons["underline"].setChecked(True)
+        self.editor._collect()
+        self.editor._reset_all()
+        self.assertEqual(self.editor.styles(), {})
+
+    def test_the_reset_buttons_are_dead_until_there_is_something_to_reset(self):
+        self.pick("footer")
+        self.assertFalse(self.editor.reset_one.isEnabled())
+        self.assertFalse(self.editor.reset_all.isEnabled())
+        self.editor.effect_buttons["bold"].setChecked(True)
+        self.editor._collect()
+        self.assertTrue(self.editor.reset_one.isEnabled())
+        self.assertTrue(self.editor.reset_all.isEnabled())
+
+    # ---------------------------------------------------------------- saving
+    def test_the_styling_is_saved_with_the_profile(self):
+        self.pick("lab_name")
+        self.editor.align_buttons["center"].setChecked(True)
+        self.editor._collect()
+        self.settings.save()
+
+        self.storage.clear_cache()
+        profile = self.storage.load_profile()
+        self.assertEqual(profile.text_styles, {"lab_name": {"align": "center"}})
+
+    def test_the_saved_styling_comes_back_into_the_controls(self):
+        self.storage.save_profile(LabProfile(
+            lab_name="Test Lab", text_styles={"footer": {"align": "right",
+                                                         "italic": "1"}}))
+        self.settings.load()
+        self.pick("footer")
+        self.assertTrue(self.editor.align_buttons["right"].isChecked())
+        self.assertTrue(self.editor.effect_buttons["italic"].isChecked())
+
+    def test_a_styled_region_is_marked_in_the_picker(self):
+        """Otherwise the only way to find what was changed is to open all
+        eighteen regions in turn."""
+        self.pick("footer")
+        self.editor.effect_buttons["italic"].setChecked(True)
+        self.editor._collect()
+        index = self.editor.picker.currentIndex()
+        self.assertTrue(self.editor.picker.itemText(index).strip().endswith("*"))
+
+    # --------------------------------------------------------------- preview
+    def test_the_preview_shows_the_styling_as_it_is_chosen(self):
+        self.pick("lab_name")
+        self.editor.font_box.setCurrentIndex(
+            self.editor.font_box.findData("Georgia"))
+        self.assertIn("Georgia", self.settings.preview.toHtml())
+
+    def test_the_preview_is_rendered_by_the_real_report_builder(self):
+        """A preview kept in step with the printer by hand is one that will
+        eventually lie, so it goes through report_html like everything else."""
+        from app import report_html
+        from app.ui.settings_view import sample_document
+
+        expected = report_html.build(sample_document(),
+                                     self.settings.current_profile())
+        self.assertIn("Sample Patient", expected)
+        self.assertIn("Sample Patient", self.settings.preview.toHtml())
+
+    def test_the_styling_does_not_reach_the_bill(self):
+        """The bill is an accounting document on a ruled form and is left alone,
+        so one set of controls cannot quietly restyle two documents."""
+        from app import bill_html
+        from app.ui.settings_view import sample_document
+
+        self.pick("lab_name")
+        self.editor.font_box.setCurrentIndex(
+            self.editor.font_box.findData("Georgia"))
+        bill = bill_html.build(sample_document(),
+                               self.settings.current_profile())
+        self.assertNotIn("Georgia", bill)

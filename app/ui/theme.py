@@ -265,6 +265,16 @@ QPushButton#Ghost {{
 }}
 QPushButton#Ghost:hover {{ background: {ACCENT_SOFT}; color: {ACCENT_DARK}; }}
 
+/* A button that stays in: the alignment and bold/italic/underline controls on
+   the laboratory profile. A plain QPushButton gives no sign that it is checked,
+   so the state has to be painted here or the operator cannot tell which
+   alignment is the current one. */
+QPushButton#Toggle {{ padding: 7px 10px; font-weight: 600; }}
+QPushButton#Toggle:checked {{
+    background: {ACCENT_SOFT}; border-color: {ACCENT}; color: {ACCENT_DARK};
+}}
+QPushButton#Toggle:checked:hover {{ background: {ACCENT_SOFT}; }}
+
 /* ----------------------------------------------------------------- tables */
 QTableWidget {{
     background: {SURFACE};

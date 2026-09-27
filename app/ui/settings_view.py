@@ -9,16 +9,58 @@ from PySide6.QtWidgets import (
     QVBoxLayout, QWidget,
 )
 
-from .. import security, storage
+from .. import report_html, security, storage
 from ..billing import DEFAULT_BILL_NOTES
-from ..models import LabProfile
+from ..models import BillItem, Billing, LabProfile, Report, TestRow
 from .. import validators as V
-from ..report_html import CSS, footer, letterhead
 from . import icons
+from .text_style_editor import TextStyleEditor
 from .theme import MUTED, S2, S3
 from .widgets import Card, PageHeader, icon_button
 
 IMAGE_FILTER = "Images (*.png *.jpg *.jpeg *.bmp *.gif)"
+
+def sample_document() -> Report:
+    """A stand-in report for the preview, carrying one of everything.
+
+    Every region the appearance editor offers has to be visible in the preview or
+    the control for it is a guess: hence a flagged result (for the H/L mark and
+    its legend), a sub-heading inside the panel, remarks, and a part-paid bill.
+    The figures are obvious nonsense so nobody mistakes the preview for a real
+    report - "Sample Patient" against a made-up number.
+    """
+    return Report(
+        report_no="BR-000123",
+        title="Mrs.",
+        patient_name="Sample Patient",
+        age="34",
+        sex="F",
+        patient_id="HFCD-000123",
+        phone="+91 9845012345",
+        referred_by="Dr. Sample",
+        sample_type="Blood",
+        collected_on="01-01-2026 09:15 AM",
+        reported_on="01-01-2026 11:40 AM",
+        remarks="Sample remarks - please correlate clinically.",
+        panels=["Complete Blood Count (CBC)"],
+        rows=[
+            TestRow("Complete Blood Count (CBC)", "Haemoglobin (Hb)",
+                    "9.2", "g/dL", "12.0 - 15.0"),
+            TestRow("Complete Blood Count (CBC)", "Total WBC Count",
+                    "7,400", "/cmm", "4,000 - 11,000"),
+            TestRow("Complete Blood Count (CBC)", "DIFFERENTIAL COUNT",
+                    kind="heading"),
+            TestRow("Complete Blood Count (CBC)", "Neutrophils",
+                    "62", "%", "40 - 75"),
+        ],
+        billing=Billing(
+            bill_no="CB-000123",
+            bill_date="01-01-2026",
+            net_deposit="400",
+            items=[BillItem("Complete Blood Count (CBC)", "600")],
+        ),
+    )
+
 
 # Every field that holds a phone number: validated, normalised and length-capped
 # the same way, so the letterhead never shows two numbers in two styles.
@@ -100,6 +142,10 @@ class SettingsView(QWidget):
     def __init__(self):
         super().__init__()
         self.edits = {}
+        # Built further down, but the field editors are wired to the preview as
+        # they are created and the first keystroke must not outrun them.
+        self.style_editor = None
+        self.preview = None
 
         form = QFormLayout()
         form.setLabelAlignment(Qt.AlignRight | Qt.AlignVCenter)
@@ -187,10 +233,18 @@ class SettingsView(QWidget):
                    "printed on every report and every bill")
         box.add(form)
 
+        self.style_editor = TextStyleEditor()
+        self.style_editor.changed.connect(self._refresh_preview)
+        style_box = Card("Text Appearance",
+                         "alignment, font, size, colour and bold / italic / "
+                         "underline, region by region")
+        style_box.add(self.style_editor)
+
         self.preview = QTextBrowser()
-        self.preview.setMinimumHeight(168)
-        preview_box = Card("Letterhead and Footer Preview",
-                           "exactly how the top and the foot of the report will print",
+        self.preview.setMinimumHeight(460)
+        preview_box = Card("Report Preview",
+                           "exactly how the sheet will print, with your own "
+                           "styling",
                            elevated=False)
         preview_box.add(self.preview)
 
@@ -204,6 +258,7 @@ class SettingsView(QWidget):
         layout.setSpacing(S3)
         layout.setContentsMargins(0, 2, 2, 2)
         layout.addWidget(box)
+        layout.addWidget(style_box)
         layout.addWidget(preview_box)
         layout.addWidget(self._build_security_box())
         layout.addStretch(1)
@@ -429,6 +484,7 @@ class SettingsView(QWidget):
         self.signature.set_path(profile.signature_path)
         self.technician_signature.set_path(profile.technician_signature_path)
         self.backup_edit.setText(profile.backup_dir)
+        self.style_editor.set_styles(profile.text_styles)
         self._refresh_preview()
 
     def current_profile(self) -> LabProfile:
@@ -444,12 +500,21 @@ class SettingsView(QWidget):
         profile.signature_path = self.signature.path
         profile.technician_signature_path = self.technician_signature.path
         profile.backup_dir = self.backup_edit.text().strip()
+        profile.text_styles = (self.style_editor.styles()
+                               if self.style_editor else {})
         return profile
 
     def _refresh_preview(self):
-        profile = self.current_profile()
-        html = letterhead(profile) + footer(profile)
-        self.preview.setHtml(f"<html><head><style>{CSS}</style></head><body>{html}</body></html>")
+        """Re-render the whole sample sheet through the real renderer.
+
+        Through `report_html.build` rather than through a mock-up of it: a
+        preview that agrees with the printer only because someone kept two
+        layouts in step is a preview that will eventually lie."""
+        if self.preview is None:
+            return          # still being built; load() renders the first one
+        self.preview.setHtml(
+            report_html.build(sample_document(), self.current_profile())
+            .replace(report_html.FOOTER_PAD, ""))
 
     def save(self):
         profile = self.current_profile()

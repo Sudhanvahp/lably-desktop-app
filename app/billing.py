@@ -33,10 +33,15 @@ MAX_AMOUNT = Decimal("9999999.99")
 BILL_DATE_FMT = "%d-%m-%Y %I:%M:%S %p"
 BILL_QT_DATE_FMT = "dd-MM-yyyy hh:mm:ss AP"
 
-# How it reads on the printed bill: "30-Aug-2026 10.43.30 AM". The month is
-# spelled out because "30-08" and "08-30" are the same six characters, and the
-# time is dotted the way the lab's own slip prints it.
-BILL_PRINT_DATE_FMT = "%d-%b-%Y %I.%M.%S %p"
+# How it reads on the printed bill: "06 Sep 2026". The month is spelled out
+# because "06-09" and "09-06" are the same six characters and are read opposite
+# ways on either side of the world.
+#
+# The day alone, with no time on it: a bill is filed and looked up by its date,
+# and the minute it was raised is noise on the counter's copy. The timestamp is
+# still what gets stored - only the printing drops it - so a later build can put
+# it back without touching a single saved bill.
+BILL_PRINT_DATE_FMT = "%d %b %Y"
 
 # The first build stored the day alone. Those bills still have to open.
 _LEGACY_DATE_FMTS = ("%d-%m-%Y",)
@@ -71,12 +76,7 @@ def format_bill_date(stored: str) -> str:
             when = datetime.strptime(text, fmt)
         except ValueError:
             continue
-        printed = when.strftime(BILL_PRINT_DATE_FMT)
-        if fmt in _LEGACY_DATE_FMTS:
-            # A day-only bill has no time; the midnight is an artefact of
-            # parsing it, so it is dropped rather than printed as fact.
-            printed = printed.replace(" 12.00.00 AM", "")
-        return printed
+        return when.strftime(BILL_PRINT_DATE_FMT)
     return text
 
 # Rows typed by hand rather than loaded from a panel bill under one heading,

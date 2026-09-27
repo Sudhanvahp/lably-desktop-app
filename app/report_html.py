@@ -23,6 +23,7 @@ from .billing import (CURRENCY, format_amount, format_bill_date,
                       has_content, parse_amount, summary)
 from .models import LabProfile, Report, TestRow
 from .panels import flag_for
+from . import text_style
 
 INK = "#000000"
 INK_SOFT = "#333333"
@@ -30,11 +31,6 @@ MUTED = "#555555"
 RULE = "#000000"
 RULE_SOFT = "#999999"
 BRAND = "#1a4fa3"          # the one colour on the page: the lab's own name
-# The footer is set in a lighter blue than the letterhead, under a rule of
-# the same family: it echoes the title without competing with it, and the
-# tint still prints legibly at 7.5pt on a mono laser.
-BRAND_SOFT = "#5b86c9"     # footer type
-RULE_BLUE = "#9dbbe4"      # the light blue rule above the footer
 FLAG = "#b00020"           # H / L marks only
 
 
@@ -92,6 +88,8 @@ def letterhead(lab: LabProfile) -> str:
 
     The capitals are applied here rather than in the stylesheet because Qt's
     rich text has no `text-transform`."""
+    name_align = text_style.align_for(lab, "lab_name")
+    sub_align = text_style.align_for(lab, "lab_subtitle")
     logo = _data_uri(lab.logo_path)
     logo_cell = (
         f'<td width="80" valign="middle" style="padding-right:10px;">'
@@ -100,12 +98,12 @@ def letterhead(lab: LabProfile) -> str:
         else ""
     )
     lines: List[str] = [
-        f'<div class="labname" align="left">'
+        f'<div class="labname" align="{name_align}">'
         f'{escape((lab.lab_name or "Laboratory Name").upper())}</div>'
     ]
     if lab.lab_subtitle:
         lines.append(
-            f'<div class="labsub" align="left">'
+            f'<div class="labsub" align="{sub_align}">'
             f'{escape(lab.lab_subtitle.upper())}</div>'
         )
     # Left-ranged, so the text takes whatever room the logo leaves over and no
@@ -113,14 +111,16 @@ def letterhead(lab: LabProfile) -> str:
     return (
         '<table width="100%" cellpadding="0" cellspacing="0"><tr>'
         + logo_cell
-        + '<td valign="middle" align="left">' + "".join(lines) + "</td>"
+        + f'<td valign="middle" align="{name_align}">'
+        + "".join(lines) + "</td>"
         + "</tr></table>"
     )
 
 
 def footer(lab: LabProfile) -> str:
-    """Address, contact details, hours and the footer note, under a rule at the
-    foot of the page - where a patient looks for how to reach the lab."""
+    """Address, contact details, hours and the footer note, in black under a
+    black rule at the foot of the page - where a patient looks for how to reach
+    the lab."""
     lines: List[str] = []
     address = ", ".join(part for part in (lab.address1, lab.address2) if part)
     if address:
@@ -137,8 +137,9 @@ def footer(lab: LabProfile) -> str:
     if not lines:
         return ""
     return (
-        _rule(RULE_BLUE, 1)
-        + '<div class="footer" align="center" style="padding-top:3px;">'
+        _rule(RULE, 1)
+        + f'<div class="footer" align="{text_style.align_for(lab, "footer")}"'
+        + ' style="padding-top:3px;">'
         + "<br>".join(lines)
         + "</div>"
     )
@@ -147,20 +148,22 @@ def footer(lab: LabProfile) -> str:
 # --------------------------------------------------------------------------
 # the report
 # --------------------------------------------------------------------------
-def _title_bar(r: Report) -> str:
+def _title_bar(r: Report, lab: LabProfile) -> str:
     """The document's name, ruled above and below, report number opposite."""
     meta = f"Report No: {escape(r.report_no)}" if r.report_no else "&nbsp;"
     return (
         _rule(RULE, 1)
         + '<table width="100%" cellspacing="0" cellpadding="2"><tr>'
-        '<td class="doctitle">LABORATORY TEST REPORT</td>'
-        f'<td align="right" class="docmeta">{meta}</td>'
+        f'<td class="doctitle" align="{text_style.align_for(lab, "doc_title")}">'
+        "LABORATORY TEST REPORT</td>"
+        f'<td align="{text_style.align_for(lab, "doc_meta")}" class="docmeta">'
+        f"{meta}</td>"
         "</tr></table>"
         + _rule(RULE, 1)
     )
 
 
-def _patient_block(r: Report) -> str:
+def _patient_block(r: Report, lab: LabProfile) -> str:
     age = f"{r.age} {dict(Y='Years', M='Months', D='Days').get(r.age_unit, '')}".strip()
     left = [
         ("Patient Name", r.display_name()),
@@ -174,6 +177,9 @@ def _patient_block(r: Report) -> str:
         ("Reported On", r.reported_on),
     ]
 
+    label_align = text_style.align_for(lab, "patient_label")
+    value_align = text_style.align_for(lab, "patient_value")
+
     def col(items):
         out = []
         for k, v in items:
@@ -182,9 +188,11 @@ def _patient_block(r: Report) -> str:
             # The patient's name is the one thing on the page set in bold.
             shown = f"<b>{escape(v)}</b>" if k == "Patient Name" else escape(v)
             out.append(
-                f'<tr><td class="lbl" valign="top">{escape(k)}</td>'
+                f'<tr><td class="lbl" align="{label_align}" valign="top">'
+                f'{escape(k)}</td>'
                 f'<td class="cln" valign="top">:</td>'
-                f'<td class="val" valign="top">{shown}</td></tr>')
+                f'<td class="val" align="{value_align}" valign="top">'
+                f'{shown}</td></tr>')
         return "".join(out)
 
     return (
@@ -237,10 +245,11 @@ def with_page_breaks(html: str, indexes) -> str:
     return "".join(out)
 
 
-def _rows_table(rows: List[TestRow], start: int = 1, title: str = "") -> Tuple[str, int]:
+def _rows_table(rows: List[TestRow], lab: LabProfile, title: str = "") -> str:
     """One panel: its title and column headings over its rows, as a single
-    table. Returns (html, next serial). Serial numbers run on across panels so
-    the last one is the count of tests on the report.
+    table. Each panel numbers its own tests from 1, the way a lab reads a
+    panel - the number is the test's place within its panel, not a running
+    count of the whole report.
 
     The title and the column headings sit in a `<thead>` rather than in a block
     of their own above the table. Qt repeats a table's header rows on every
@@ -248,22 +257,25 @@ def _rows_table(rows: List[TestRow], start: int = 1, title: str = "") -> Tuple[s
     its name and its column headings over to the next - and the title can never
     be left stranded at the foot of a page with its rows overleaf, because it
     is part of the table that breaks."""
+    head_align = text_style.align_for(lab, "table_head")
+    body_align = text_style.align_for(lab, "table_body")
     out = [
         PANEL_TABLE_OPEN + ">",
         "<thead>",
-        (f'<tr><td colspan="5" class="panel">{escape(title)}</td></tr>'
+        (f'<tr><td colspan="4" class="panel" '
+         f'align="{text_style.align_for(lab, "panel_title")}">'
+         f"{escape(title)}</td></tr>"
          if title else ""),
-        '<tr><th align="left" width="8%" style="white-space:nowrap;">Sl. No.</th>'
-        '<th align="left" width="36%">Test</th>'
-        '<th align="left" width="16%">Result</th>'
-        '<th align="left" width="14%">Unit</th>'
-        '<th align="left" width="26%">Reference Range</th></tr>',
+        f'<tr><th align="{head_align}" width="40%">Test</th>'
+        f'<th align="{head_align}" width="18%">Result</th>'
+        f'<th align="{head_align}" width="14%">Unit</th>'
+        f'<th align="{head_align}" width="28%">Reference Range</th></tr>',
         "</thead>",
     ]
-    serial = start
     for row in rows:
         if row.is_heading():
-            out.append(f'<tr><td></td><td colspan="4" class="subhead">'
+            out.append(f'<tr><td colspan="4" class="subhead" '
+                       f'align="{text_style.align_for(lab, "section_head")}">'
                        f"{escape(row.name)}</td></tr>")
             continue
         flag = flag_for(row.result, row.ref)
@@ -272,32 +284,32 @@ def _rows_table(rows: List[TestRow], start: int = 1, title: str = "") -> Tuple[s
             value = f'{value}&nbsp;&nbsp;<span class="flag">{flag}</span>'
         out.append(
             "<tr>"
-            f'<td class="slno">{serial}</td>'
-            f'<td class="tname">{escape(row.name)}</td>'
-            f'<td>{value}</td>'
-            f'<td class="unit">{escape(row.unit)}</td>'
-            f'<td class="ref">{escape(row.ref)}</td></tr>'
+            f'<td class="tname" align="{body_align}">{escape(row.name)}</td>'
+            f'<td class="res" align="{body_align}">{value}</td>'
+            f'<td class="unit" align="{body_align}">{escape(row.unit)}</td>'
+            f'<td class="ref" align="{body_align}">{escape(row.ref)}</td></tr>'
         )
-        serial += 1
     out.append("</table>")
-    return "".join(out), serial
+    return "".join(out)
 
 
-def _legend(rows: List[TestRow]) -> str:
+def _legend(rows: List[TestRow], lab: LabProfile) -> str:
     """Explains the H/L marks, but only on reports that actually carry one."""
     if not _tally(rows)[1]:
         return ""
     return (
-        '<div class="legend"><span class="flag">H</span> above reference range'
+        f'<div class="legend" align="{text_style.align_for(lab, "legend")}">'
+        '<span class="flag">H</span> above reference range'
         '&nbsp;&nbsp;&middot;&nbsp;&nbsp;<span class="flag">L</span> below '
         "reference range</div>"
     )
 
 
-def _remarks(text: str) -> str:
+def _remarks(text: str, lab: LabProfile) -> str:
     return (
         '<table width="100%" cellspacing="0" cellpadding="2"><tr>'
-        f'<td class="remarks"><span class="remarks-h">Remarks:</span> '
+        f'<td class="remarks" align="{text_style.align_for(lab, "remarks")}">'
+        f'<span class="remarks-h">Remarks:</span> '
         f'{escape(text)}</td></tr></table>'
     )
 
@@ -313,7 +325,7 @@ BILL_TOTALS = (
 )
 
 
-def _bill_header(r: Report) -> str:
+def _bill_header(r: Report, lab: LabProfile) -> str:
     bill = r.billing
     meta = []
     if bill.bill_no:
@@ -322,23 +334,28 @@ def _bill_header(r: Report) -> str:
         meta.append(f"Date: {escape(format_bill_date(bill.bill_date))}")
     return (
         '<table width="100%" cellspacing="0" cellpadding="2"><tr>'
-        '<td class="panel">BILL SUMMARY</td>'
-        f'<td align="right" class="docmeta">'
+        f'<td class="panel" align="{text_style.align_for(lab, "panel_title")}">'
+        "BILL SUMMARY</td>"
+        f'<td align="{text_style.align_for(lab, "doc_meta")}" class="docmeta">'
         f'{"&nbsp;&nbsp;&middot;&nbsp;&nbsp;".join(meta) or "&nbsp;"}</td>'
         "</tr></table>"
         + _rule(RULE, 1)
     )
 
 
-def _bill_items(r: Report) -> str:
+def _bill_items(r: Report, lab: LabProfile) -> str:
     """One numbered row per billed service. An unpriced line prints a dash
     rather than 0.00, so 'not charged for' and 'charged nothing' stay
     distinguishable."""
+    head_align = text_style.align_for(lab, "table_head")
+    body_align = text_style.align_for(lab, "table_body")
+    money_align = text_style.align_for(lab, "money")
     out = [
         '<table width="100%" class="results" cellspacing="0" cellpadding="1">',
-        '<tr><th align="left" width="8%" style="white-space:nowrap;">Sl. No.</th>'
-        '<th align="left" width="64%">Service / Test</th>'
-        f'<th align="right" width="28%">Amount ({CURRENCY})</th></tr>',
+        f'<tr><th align="{head_align}" width="8%" '
+        'style="white-space:nowrap;">Sl. No.</th>'
+        f'<th align="{head_align}" width="64%">Service / Test</th>'
+        f'<th align="{money_align}" width="28%">Amount ({CURRENCY})</th></tr>',
     ]
     for i, item in enumerate(r.billing.items, 1):
         amount = parse_amount(item.amount)
@@ -346,24 +363,26 @@ def _bill_items(r: Report) -> str:
         out.append(
             "<tr>"
             f'<td class="slno">{i}</td>'
-            f'<td class="tname">{escape(item.service)}</td>'
-            f'<td align="right" class="money">{text}</td></tr>'
+            f'<td class="tname" align="{body_align}">{escape(item.service)}</td>'
+            f'<td align="{money_align}" class="money">{text}</td></tr>'
         )
     out.append("</table>")
     return "".join(out)
 
 
-def _bill_totals(r: Report) -> str:
+def _bill_totals(r: Report, lab: LabProfile) -> str:
     figures = summary(r.billing)
+    money_align = text_style.align_for(lab, "money")
     rows = [
-        f'<tr><td class="billlbl" align="right">{label}</td>'
-        f'<td class="money" align="right" width="34%">'
+        f'<tr><td class="billlbl" align="{money_align}">{label}</td>'
+        f'<td class="money" align="{money_align}" width="34%">'
         f"{format_amount(figures[key])}</td></tr>"
         for label, key in BILL_TOTALS
     ]
     rows.append(
-        f'<tr><td align="right" class="billlbl">Balance</td>'
-        f'<td align="right" class="money">{format_amount(figures["balance"])}</td></tr>'
+        f'<tr><td align="{money_align}" class="billlbl">Balance</td>'
+        f'<td align="{money_align}" class="money">'
+        f'{format_amount(figures["balance"])}</td></tr>'
     )
     return (
         '<table width="100%" cellspacing="0" cellpadding="0"><tr>'
@@ -374,25 +393,27 @@ def _bill_totals(r: Report) -> str:
     )
 
 
-def _bill_summary(r: Report) -> str:
+def _bill_summary(r: Report, lab: LabProfile) -> str:
     """The whole billing block, or nothing at all - rendered only when the bill
     carries figures, and placed after the results and remarks."""
     if not has_content(r.billing):
         return ""
-    return _bill_header(r) + _bill_items(r) + _rule(RULE_SOFT, 1) + _bill_totals(r)
+    return (_bill_header(r, lab) + _bill_items(r, lab) + _rule(RULE_SOFT, 1)
+            + _bill_totals(r, lab))
 
 
 # --------------------------------------------------------------------------
 # closing
 # --------------------------------------------------------------------------
-def _end_marker() -> str:
+def _end_marker(lab: LabProfile) -> str:
     """'End of Report' set between two rules, so nothing after it can be passed
     off as part of the report."""
     side = f'<td width="40%" valign="middle">{_rule(RULE_SOFT, 1)}</td>'
     return (
         '<table width="100%" cellspacing="0" cellpadding="0"><tr>'
         + side
-        + '<td align="center" valign="middle" class="end">'
+        + f'<td align="{text_style.align_for(lab, "end_marker")}"'
+        ' valign="middle" class="end">'
         "&nbsp;&nbsp;End of Report&nbsp;&nbsp;</td>"
         + side
         + "</tr></table>"
@@ -440,21 +461,24 @@ def _signature(lab: LabProfile, r: Report) -> str:
                    "Consultant Pathologist"),
     ]
 
-    def cell(content: str, cls: str = "") -> str:
-        return f'<td align="center" width="50%" class="{cls}">{content}</td>'
+    def cell(content: str, cls: str = "", key: str = "sign_name") -> str:
+        align = text_style.align_for(lab, key)
+        return (f'<td align="{align}" width="50%" class="{cls}">'
+                f"{content}</td>")
 
     def row(cells: List[str]) -> str:
         return "<tr>" + "".join(cells) + "</tr>"
 
     blank = "&nbsp;"
     space = row([cell(f'<img src="{p.image}" height="{SIGN_SPACE_PT}">' if p.image
-                      else _spacer(SIGN_SPACE_PT))
+                      else _spacer(SIGN_SPACE_PT), "", "sign_name")
                  for p in people])
-    names = row([cell(escape(p.name) if p.name else blank, "signname") for p in people])
+    names = row([cell(escape(p.name) if p.name else blank, "signname",
+                      "sign_name") for p in people])
     # Role and qualification share a line ("Consultant Pathologist, MD") so it is
     # one row shorter - that row is what keeps a full panel on one sheet.
     roles = row([cell(", ".join(x for x in (p.role, escape(p.degrees)) if x),
-                      "signrole") for p in people])
+                      "signrole", "sign_role") for p in people])
     return (
         '<table width="100%" cellspacing="0" cellpadding="0">'
         + space + names + roles
@@ -478,9 +502,12 @@ body {{ font-family: 'Segoe UI', Calibri, Arial, sans-serif; font-size: 8pt;
 table.results th {{ font-size: 7.5pt; font-weight: normal; color: {INK_SOFT};
                     border-bottom: 1px solid {RULE_SOFT}; }}
 table.results td.panel {{ border-bottom: 1px solid {RULE}; }}
-table.results td {{ border-bottom: 1px solid #e6e6e6; font-size: 8pt; }}
+table.results td {{ font-size: 8pt; }}
 .slno {{ color: {MUTED}; }}
 .tname {{ color: {INK}; }}
+/* The result cell. It has a class purely so the lab can restyle results
+   without the rule also catching the panel titles in the same table. */
+.res {{ color: {INK}; }}
 .unit {{ color: {INK_SOFT}; font-size: 8pt; }}
 .ref {{ color: {INK_SOFT}; font-size: 8pt; }}
 .flag {{ color: {FLAG}; }}
@@ -492,10 +519,18 @@ td.subhead {{ font-size: 7.5pt; color: {INK_SOFT}; letter-spacing: 1px; }}
 .remarks {{ font-size: 8.5pt; color: {INK}; }}
 .remarks-h {{ color: {MUTED}; }}
 .end {{ font-size: 7.5pt; color: {MUTED}; letter-spacing: 2px; white-space: nowrap; }}
-.signname {{ font-size: 8.5pt; color: {INK}; }}
-.signrole {{ font-size: 7.5pt; color: {MUTED}; }}
-.footer {{ font-size: 7.5pt; color: {BRAND_SOFT}; }}
+.signname {{ font-size: 8.5pt; font-weight: bold; color: {INK}; }}
+.signrole {{ font-size: 7.5pt; font-weight: bold; color: {INK}; }}
+.footer {{ font-size: 7.5pt; color: {INK}; }}
 """
+
+
+def stylesheet(lab: LabProfile) -> str:
+    """The report's stylesheet with the lab's own text styling appended.
+
+    `CSS` stays the default it always was; anything rendering a report asks for
+    this instead, so preview, printer and PDF cannot drift apart."""
+    return text_style.stylesheet(CSS, lab)
 
 
 def build(report: Report, lab: LabProfile, with_bill: bool = True) -> str:
@@ -508,9 +543,9 @@ def build(report: Report, lab: LabProfile, with_bill: bool = True) -> str:
     body = [
         letterhead(lab),
         _spacer(6),
-        _title_bar(report),
+        _title_bar(report, lab),
         _spacer(2),
-        _patient_block(report),
+        _patient_block(report, lab),
     ]
 
     # Group rows by panel, preserving the order they appear in the report.
@@ -523,36 +558,37 @@ def build(report: Report, lab: LabProfile, with_bill: bool = True) -> str:
             order.append(key)
         grouped[key].append(row)
 
-    serial = 1
     for key in order:
         body.append(_spacer(3))
-        table, serial = _rows_table(grouped[key], serial, key)
-        body.append(table)
+        body.append(_rows_table(grouped[key], lab, key))
 
-    legend = _legend(report.rows)
+    legend = _legend(report.rows, lab)
     if legend:
         body.append(_spacer(1))
         body.append(legend)
 
     if report.remarks:
         body.append(_spacer(2))
-        body.append(_remarks(report.remarks))
+        body.append(_remarks(report.remarks, lab))
 
-    bill = _bill_summary(report) if with_bill else ""
+    bill = _bill_summary(report, lab) if with_bill else ""
     if bill:
         body.append(_spacer(2))
         body.append(bill)
 
     body.append(_spacer(1))
-    body.append(_end_marker())
-    body.append(_signature(lab, report))
+    body.append(_end_marker(lab))
 
     foot = footer(lab)
     if foot:
-        # Everything above is set solid; the slack goes here, so the footer
-        # lands at the foot of the page.
+        # Everything above is set solid; the slack goes here, so the signatures
+        # and the footer under them land at the foot of the page rather than
+        # floating halfway up it.
         body.append(FOOTER_PAD)
+    body.append(_signature(lab, report))
+    if foot:
         body.append(_spacer(2))
         body.append(foot)
 
-    return f"<html><head><style>{CSS}</style></head><body>{''.join(body)}</body></html>"
+    return (f"<html><head><style>{stylesheet(lab)}</style></head>"
+            f"<body>{''.join(body)}</body></html>")

@@ -26,20 +26,61 @@ in capitals and at the same size, ranged left at the top of every report, beside
 the bill keeps its centred letterhead), address, phone, email, registration number, **lab timings** and
 **holidays** (free text, optional - e.g. "Sundays & public holidays"), consultant pathologist's name and
 degrees, the **lab technician's name**, and pick a logo and the two signature images.
-The report is deliberately plain - black type on white, thin rules, nothing bold except the
-patient's name - and sized so one full panel with its bill and signatures fits one A4 sheet.
+The report is deliberately plain - black type on white, no ruled grid around the results,
+thin rules only where a section ends - and sized so one full panel with its bill and signatures fits one A4 sheet.
 That one-sheet rule is what sets the page: the letterhead is set large, so the report prints
 to 6mm top and bottom margins and leaves about 10.6mm above each name to sign in. Anything
 further added to the letterhead has to be paid for out of one of those two.
-The address, contact details, timings and holidays print in the **footer**, set in a
-lighter blue under a light blue rule and pinned to the **foot of the sheet** - the app
-measures the laid-out page and fills the gap above it, so the footer sits on the bottom
-edge whether the report is one panel or five. The lab
-technician (left) and the **Consultant Pathologist** (right) sign the foot of every report, on one
+The address, contact details, timings and holidays print in the **footer**, in black
+under a black rule and pinned to the **foot of the sheet** - the app measures the
+laid-out page and fills the gap above it, so the footer sits on the bottom edge whether
+the report is one panel or five. The **Lab Technician** (left) and the **Consultant
+Pathologist** (right) sign immediately above that footer, both in bold, on one
 line, each with a clear space above the name to sign in and no rule. Change anything in the profile and every report printed from then on carries
-the new details. A live preview shows the letterhead
-exactly as it will print. Chosen images are copied into the app's own `assets` folder, so the report keeps
+the new details. A live preview under the form shows a whole sample report,
+exactly as it will print, rendered by the same code that drives the printer.
+How each of those lines *looks* is yours to set too: see
+[Text appearance](#text-appearance) below. Chosen images are copied into the app's own `assets` folder, so the report keeps
 working even if you later move or delete the originals.
+
+## Text appearance
+
+Every piece of text on the **report** can be set the way the lab wants it, from
+the **Text Appearance** panel on the Laboratory Profile page: pick a region from
+the list, and set its
+
+* **alignment** - left, centre or right, the way a spreadsheet does it;
+* **font** - one of thirteen faces that ship with Windows, so a report styled on
+  the counter PC prints the same on the one in the back room;
+* **size** - 5pt to 48pt, in half points where the body of the report lives;
+* **colour** - any colour, from the standard Windows colour picker;
+* **bold**, *italic* and underline.
+
+The regions are the whole sheet, top to bottom: laboratory name, sub-heading,
+document title, report number, patient labels, patient details, panel titles,
+sub-headings inside a panel, column headings, results, the H/L legend, remarks,
+amounts and totals, signatory names, signatory roles, End of Report and the
+footer. The preview redraws as you go.
+
+**The bill is deliberately left out of this.** It is an accounting document that
+gets photocopied, faxed and filed, its layout is a ruled form the lab already
+issues, and one set of controls answering for two documents means never being
+sure which one a change will land on. The bill prints the way it always has.
+
+Two things it deliberately does *not* do:
+
+* It stores **only what you changed**. A control put back where it started is
+  stored as nothing at all, so a profile nobody has restyled prints exactly what
+  it printed before the panel existed - and a lab that has centred its letterhead
+  has not thereby frozen the size of every other line on the page.
+* It cannot restyle a region into something that is not text. Alignment, font,
+  size, colour and the three effects are the whole list; the rules and the page
+  margins are layout, and they stay put.
+
+**Reset this text** puts one region back to the standard layout and **Reset
+everything** puts the lot back. The regions carrying styling are marked with a
+`*` in the list, and the line under the controls names them, so "what have I
+changed?" is answerable without opening all seventeen in turn.
 
 ## Making a report
 
@@ -60,7 +101,9 @@ working even if you later move or delete the originals.
    ticked appears as one line - a lab bills for "CBC", not for each of its fifteen
    components - filled in with the panel's standing **price** from Test Templates if
    one is set, and the total, net payable and balance recalculate as you type.
-   Tests and bill lines are numbered (Sl. No.) on screen and on the printout.
+   Bill lines are numbered (Sl. No.) on the printed bill, and the entry grids on screen
+   count straight down every row you have typed. The **printed results table carries no
+   number column** - a panel's tests read as a list, not an inventory.
    Enter the **Net Deposit** if the patient has paid something; the **Balance** is
    red while anything is owed and green once it is settled. Leave it all blank and
    nothing about the report changes. **Preview Bill / Bill PDF / Print Bill** on that
@@ -102,7 +145,7 @@ document quietly acquiring the other's furniture.
 |                             Cash Bill                                    |
 |--------------------------------------------------------------------------|
 | Patient Name : Mr. PRASANNA C N    Bill No   : 416385                    |
-| Patient ID   : 147634              Bill Date : 30-Aug-2026 10.43.30 AM   |
+| Patient ID   : 147634              Bill Date : 30 Aug 2026               |
 | Age/Gender   : 67 Yrs / Male       Bill Type : Cash Bill                 |
 | Phone No     : 9620055441          Doctor    : Dr. RAVIKUMAR KULKARNI    |
 |--------------------------------------------------------------------------|
@@ -197,10 +240,12 @@ their amounts and the deposit. Every total is recomputed from those on open, so 
 corrected amount always re-totals correctly instead of disagreeing with a stale sum
 stored beside it. Money is `Decimal`, never `float`.
 
-**A bill is timestamped, not just dated.** Two bills for one patient on one
-morning have to be tellable apart at the counter, so the stored date carries the
-second and the bill prints it: `30-Aug-2026 10.43.30 AM`. Bills written by the
-first build stored the day alone and still open.
+**A bill is timestamped, but prints only its date.** Two bills for one patient
+on one morning have to be tellable apart in the data, so the stored date carries
+the second - but the slip prints the day alone, `30 Aug 2026`, because that is
+what a bill is filed and looked up by. The month is spelled out: `06-09` and
+`09-06` are the same six characters and are read opposite ways on either side of
+the world. Bills written by the first build stored the day alone and still open.
 
 **The bill's own amount is spelled out**, on its own full-width line directly
 under the services table, whether or not anything has been paid. A total can be
@@ -438,7 +483,8 @@ Preview**, **Reprint**, **Export PDF**, or **Delete**.
 
 ```
 %APPDATA%\BloodReportApp\
-  lab_profile.json        letterhead, bill notes, default billing clerk
+  lab_profile.json        letterhead, bill notes, default billing clerk,
+                          and the per-region text styling
   counter.json            report, patient and bill serial numbers
   panels.json             your test templates (only your edits, not the defaults)
   security.json           the edit password, salted and hashed - never the password
@@ -510,9 +556,12 @@ app/
   panels.py         panel catalogue + H/L range checking
   report_html.py    Report -> printable HTML letterhead and tables
   bill_html.py      Report -> the standalone printable bill
+  text_style.py     the lab's own alignment / font / size / colour per region
+                    of the report
   printing.py       print / preview / PDF via QPrinter
   ui/               main_window, report_form, history_view, settings_view
   ui/theme.py       palette and application-wide stylesheet
+  ui/text_style_editor.py  the Text Appearance controls on the profile page
   ui/toast.py       the notification banner
   ui/templates_view.py   the Test Templates page
   ui/password_dialog.py  set / ask for the edit password
@@ -528,7 +577,7 @@ app/
 python -m unittest discover -s tests -t . -v
 ```
 
-Or double-click **run_tests.bat**. 566 tests, no third-party test runner needed -
+Or double-click **run_tests.bat**. 701 tests, no third-party test runner needed -
 just the standard library plus PySide6's offscreen platform for the widget tests.
 Every test runs against a temporary APPDATA folder, so the suite never touches
 your real report data.
@@ -544,6 +593,7 @@ tests/test_security.py     password hashing, verification, corrupt records
 tests/test_storage.py      serials, atomic writes, index integrity, recovery
 tests/test_report_html.py  printable report, HTML escaping
 tests/test_bill_html.py    the standalone bill: layout, figures, escaping
+tests/test_text_style.py   per-region styling: what is stored, printed, ignored
 tests/test_ui.py           form, billing, bill printing, history, sync
 ```
 

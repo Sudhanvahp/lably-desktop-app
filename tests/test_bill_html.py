@@ -84,10 +84,12 @@ class HeaderTests(unittest.TestCase):
                          "Ref. By", "Dr. Ravikumar Kulkarni"):
             self.assertIn(expected, self.html)
 
-    def test_the_date_carries_the_time_and_spells_out_the_month(self):
-        """The slip prints the minute the bill was raised, and '30-Aug' cannot be
-        misread as the 8th of a month the way '30-08' can."""
-        self.assertIn("30-Aug-2026 10.43.30 AM", self.html)
+    def test_the_date_is_the_day_alone_with_the_month_spelled_out(self):
+        """'30 Aug 2026' cannot be misread the way '30-08-2026' can. The minute
+        the bill was raised is stored but not printed - it is noise on a slip
+        that gets filed and looked up by its date."""
+        self.assertIn("30 Aug 2026", self.html)
+        self.assertNotIn("10.43.30", self.html)
 
     def test_a_blank_field_keeps_its_row(self):
         """The two columns are read across. Collapsing one side alone would slide
@@ -291,7 +293,7 @@ class RobustnessTests(unittest.TestCase):
         """Those bills stored the day alone, with no time on it."""
         html = build(sample_report(billing=sample_bill(bill_date="30-08-2026")),
                      sample_profile())
-        self.assertIn("30-Aug-2026", html)
+        self.assertIn("30 Aug 2026", html)
         self.assertNotIn("12.00.00 AM", html)
 
     def test_a_bill_with_no_type_falls_back_rather_than_printing_blank(self):
