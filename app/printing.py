@@ -110,8 +110,8 @@ def _footer_at_foot(html: str, size: QSizeF, page: Page) -> str:
     return best
 
 
-# A results table is the only one on the report with five columns.
-PANEL_COLUMNS = 5
+# A results table is the only one on the report with four columns.
+PANEL_COLUMNS = 4
 
 # One pass per panel is enough - moving a panel down can only push the panels
 # after it, never the ones before - with a little room over.
