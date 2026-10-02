@@ -204,7 +204,7 @@ class AmountInWordsTests(unittest.TestCase):
 
 class BillDateTests(unittest.TestCase):
     def test_the_stored_day_is_printed_with_the_month_spelled_out(self):
-        self.assertEqual(billing.format_bill_date("30-08-2026"), "30-Aug-2026")
+        self.assertEqual(billing.format_bill_date("30-08-2026"), "30 Aug 2026")
 
     def test_an_unreadable_date_is_passed_through_rather_than_blanked(self):
         self.assertEqual(billing.format_bill_date("whenever"), "whenever")

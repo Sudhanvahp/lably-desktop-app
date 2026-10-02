@@ -5,7 +5,8 @@ import unittest
 
 from app.billing import CURRENCY
 from app.models import BillItem, Billing, LabProfile, Report, TestRow
-from app.report_html import CSS, build, footer, letterhead
+from app.report_html import (CSS, FOOTER_PAD, build, footer, letterhead,
+                             panel_count, with_page_breaks)
 
 
 def sample_report(**kwargs):
@@ -44,7 +45,9 @@ class ContentTests(unittest.TestCase):
             self.assertIn(expected, self.html)
 
     def test_lab_details_are_present(self):
-        for expected in ("Sunrise Diagnostics", "MG Road", "080-1234",
+        # The lab name prints in capitals in the letterhead; everything else
+        # keeps the case it was typed in.
+        for expected in ("SUNRISE DIAGNOSTICS", "MG Road", "080-1234",
                          "Dr. A. Rao", "KA/1", "Computer generated"):
             self.assertIn(expected, self.html)
 
@@ -117,7 +120,7 @@ class BillSummaryTests(unittest.TestCase):
 
     def test_the_bill_number_and_date_are_printed(self):
         self.assertIn("BILL-000001", self.html)
-        self.assertIn("01-Jan-2026 09.15.00 AM", self.html)
+        self.assertIn("01 Jan 2026", self.html)
 
     def test_the_date_reads_the_same_here_as_on_the_standalone_bill(self):
         """One bill quoted by two documents. They must not disagree about when it
@@ -126,7 +129,7 @@ class BillSummaryTests(unittest.TestCase):
 
         report = sample_report(billing=sample_bill())
         for html in (self.html, build_bill(report, sample_profile())):
-            self.assertIn("01-Jan-2026 09.15.00 AM", html)
+            self.assertIn("01 Jan 2026", html)
             self.assertNotIn("01-01-2026 09:15:00 AM", html)
 
     def test_every_billed_service_is_listed_with_its_amount(self):
@@ -220,7 +223,7 @@ class EscapingTests(unittest.TestCase):
 
     def test_lab_fields_are_escaped(self):
         html = build(sample_report(), sample_profile(lab_name="A & B <Lab>"))
-        self.assertIn("A &amp; B &lt;Lab&gt;", html)
+        self.assertIn("A &amp; B &lt;LAB&gt;", html)
 
     def test_remarks_are_escaped(self):
         html = build(sample_report(remarks="<img src=x>"), sample_profile())
@@ -240,7 +243,7 @@ class RobustnessTests(unittest.TestCase):
         html = build(sample_report(),
                      sample_profile(logo_path="C:/nope/missing.png",
                                     signature_path="C:/nope/sig.png"))
-        self.assertIn("Sunrise Diagnostics", html)
+        self.assertIn("SUNRISE DIAGNOSTICS", html)
         self.assertNotIn("missing.png", html)
 
     def test_rows_without_a_panel_are_grouped_under_investigations(self):
@@ -250,7 +253,7 @@ class RobustnessTests(unittest.TestCase):
         self.assertIn("Custom Test", html)
 
     def test_letterhead_alone_renders(self):
-        self.assertIn("Sunrise Diagnostics", letterhead(sample_profile()))
+        self.assertIn("SUNRISE DIAGNOSTICS", letterhead(sample_profile()))
 
     def test_unicode_names_render(self):
         html = build(sample_report(patient_name="रमेश"), sample_profile())
@@ -290,39 +293,125 @@ class PlainDesignTests(unittest.TestCase):
         self.assertIn("font-size: 8pt", self.html)
 
 
-class SerialNumberTests(unittest.TestCase):
-    def test_tests_are_numbered_across_panels(self):
-        html = build(sample_report(), sample_profile())
-        for n in (1, 2, 3):
-            self.assertIn(f'<td class="slno">{n}</td>', html)
-        self.assertNotIn('<td class="slno">4</td>', html)
-        self.assertIn("Sl. No.", html)
+class PanelContinuationTests(unittest.TestCase):
+    """A panel that outruns the page carries its heading and column headings
+    onto the next sheet, because both live in the table's repeating header."""
 
-    def test_headings_take_no_number(self):
+    def setUp(self):
+        self.html = build(sample_report(), sample_profile())
+
+    def test_the_panel_title_is_a_header_row_of_its_own_table(self):
+        self.assertIn('<thead><tr><td colspan="4" class="panel" align="left">'
+                      'Complete Blood Count (CBC)</td></tr>', self.html)
+
+    def test_the_column_headings_are_in_the_same_header(self):
+        head = self.html.split("<thead>")[1].split("</thead>")[0]
+        for column in ("Test", "Result", "Unit", "Reference Range"):
+            self.assertIn(column, head)
+
+    def test_the_rows_are_outside_the_header(self):
+        head = self.html.split("<thead>")[1].split("</thead>")[0]
+        self.assertNotIn("Haemoglobin (Hb)", head)
+        self.assertIn("Haemoglobin (Hb)", self.html)
+
+    def test_one_table_per_panel(self):
+        # Two panels in the sample report, so two headers - not one table with
+        # a heading floating above it in a block of its own.
+        self.assertEqual(self.html.count("<thead>"), 2)
+        self.assertIn("Lipid Profile", self.html)
+
+    def test_rows_with_no_panel_are_headed_investigations(self):
+        html = build(sample_report(rows=[TestRow("", "Custom Test", "1", "u", "0 - 2")]),
+                     sample_profile())
+        self.assertIn("Investigations", html)
+        self.assertIn("Custom Test", html)
+
+
+class PageBreakMarkupTests(unittest.TestCase):
+    """Printing decides which panels start a fresh page; this is the rewriting
+    it uses to say so."""
+
+    def setUp(self):
+        self.html = build(sample_report(), sample_profile())
+
+    def test_every_panel_is_counted(self):
+        # Two panels in the sample report - and the bill summary, which is
+        # ruled the same way, is not one of them.
+        self.assertEqual(panel_count(self.html), 2)
+
+    def test_no_breaks_by_default(self):
+        self.assertNotIn("page-break-before", self.html)
+        self.assertIs(with_page_breaks(self.html, set()), self.html)
+
+    def test_a_break_lands_on_the_named_panel_only(self):
+        broken = with_page_breaks(self.html, {1})
+        self.assertEqual(broken.count("page-break-before:always"), 1)
+        # On the second panel: the break sits after the first panel's rows.
+        self.assertGreater(broken.index("page-break-before"),
+                           broken.index("Haemoglobin (Hb)"))
+        self.assertLess(broken.index("page-break-before"),
+                        broken.index("Total Cholesterol"))
+
+    def test_breaking_every_panel(self):
+        broken = with_page_breaks(self.html, {0, 1})
+        self.assertEqual(broken.count("page-break-before:always"), 2)
+
+    def test_the_bill_summary_is_never_broken(self):
+        # Index 2 does not exist - two panels - so nothing is rewritten even
+        # though the bill table opens with the same markup.
+        broken = with_page_breaks(self.html, {2})
+        self.assertNotIn("page-break-before", broken)
+
+
+class SerialNumberTests(unittest.TestCase):
+    def test_the_results_table_has_no_serial_column(self):
+        html = build(sample_report(), sample_profile())
+        results = html.split("BILL SUMMARY")[0]
+        self.assertNotIn("Sl. No.", results)
+        self.assertNotIn('class="slno"', results)
+        # The four columns that remain.
+        for column in ("Test", "Result", "Unit", "Reference Range"):
+            self.assertIn(column, results)
+
+    def test_a_sub_heading_row_spans_the_whole_table(self):
         report = sample_report(rows=[
             TestRow("CBC", "DIFFERENTIAL", kind="heading"),
             TestRow("CBC", "Neutrophils", "60", "%", "40 - 75"),
         ])
         html = build(report, sample_profile())
-        self.assertIn('<td class="slno">1</td>', html)
-        self.assertNotIn('<td class="slno">2</td>', html)
+        self.assertIn('<tr><td colspan="4" class="subhead" align="left">'
+                      'DIFFERENTIAL</td></tr>', html)
+
+    def test_the_bill_keeps_its_numbering(self):
+        # Only the results table loses the column; a bill still numbers its
+        # lines, because that is what a patient checks a bill against.
+        report = sample_report(billing=Billing(items=[BillItem("CBC", "400")]))
+        html = build(report, sample_profile())
+        self.assertIn("Sl. No.", html.split("BILL SUMMARY")[1])
 
     def test_bill_lines_are_numbered(self):
         report = sample_report(billing=Billing(items=[
             BillItem("CBC", "400"), BillItem("Lipid Profile", "600")]))
         html = build(report, sample_profile())
-        self.assertIn('<td class="slno">2</td><td class="tname">Lipid Profile</td>', html)
+        self.assertIn('<td class="slno">2</td>'
+                      '<td class="tname" align="left">Lipid Profile</td>', html)
 
 
 class LetterheadTests(unittest.TestCase):
-    def test_name_and_sub_heading_are_centred_and_blue(self):
+    def test_name_and_sub_heading_are_left_bold_caps_and_blue(self):
         html = letterhead(sample_profile(lab_name="Hemavathi",
                                          lab_subtitle="Family Clinic"))
-        self.assertIn('<div class="labname" align="center">Hemavathi</div>', html)
-        self.assertIn('<div class="labsub" align="center">Family Clinic</div>', html)
-        self.assertLess(html.index("Hemavathi"), html.index("Family Clinic"))
+        self.assertIn('<div class="labname" align="left">HEMAVATHI</div>', html)
+        self.assertIn('<div class="labsub" align="left">FAMILY CLINIC</div>', html)
+        self.assertLess(html.index("HEMAVATHI"), html.index("FAMILY CLINIC"))
         self.assertIn(".labname { font-size: 18pt; font-weight: bold; color: #1a4fa3", CSS)
-        self.assertIn(".labsub { font-size: 11.5pt; color: #1a4fa3", CSS)
+        # The sub-heading is set at the same size as the name above it.
+        self.assertIn(".labsub { font-size: 18pt; font-weight: bold; color: #1a4fa3", CSS)
+        self.assertIn(".labname { font-size: 18pt", CSS)
+
+    def test_a_name_typed_in_lower_case_still_prints_in_capitals(self):
+        html = letterhead(sample_profile(lab_name="hemavathi diagnostics"))
+        self.assertIn(">HEMAVATHI DIAGNOSTICS<", html)
 
     def test_no_sub_heading_prints_no_empty_line(self):
         self.assertNotIn("labsub", letterhead(sample_profile()))
@@ -331,7 +420,9 @@ class LetterheadTests(unittest.TestCase):
         html = letterhead(sample_profile(lab_subtitle="<i>x</i>"))
         self.assertNotIn("<i>x</i>", html)
 
-    def test_logo_is_balanced_by_an_empty_column(self):
+    def test_logo_needs_no_balancing_column(self):
+        # The title is ranged left beside the logo, so there is no empty
+        # column on the right to centre the text block against.
         import tempfile, os
         with tempfile.NamedTemporaryFile("wb", suffix=".png", delete=False) as fh:
             fh.write(b"\x89PNG\r\n\x1a\n")
@@ -339,7 +430,8 @@ class LetterheadTests(unittest.TestCase):
             html = letterhead(sample_profile(logo_path=fh.name))
         finally:
             os.remove(fh.name)
-        self.assertEqual(html.count('width="80"'), 2)
+        self.assertEqual(html.count('width="80"'), 1)
+        self.assertIn('align="left"', html)
 
     def test_contact_details_moved_to_the_footer(self):
         profile = sample_profile(address1="MG Road", phone="080-1234",
@@ -352,6 +444,22 @@ class LetterheadTests(unittest.TestCase):
             self.assertIn(text, foot)
         self.assertLess(build(sample_report(), profile).index("End of Report"),
                         build(sample_report(), profile).index("MG Road"))
+
+    def test_footer_is_black_under_a_black_rule(self):
+        foot = footer(sample_profile(address1="MG Road"))
+        self.assertIn('bgcolor="#000000"', foot)
+        self.assertIn(".footer { font-size: 7.5pt; color: #000000;", CSS)
+
+    def test_the_slack_marker_sits_just_above_the_footer(self):
+        # Printing swaps the marker for a measured spacer, which is what drops
+        # the footer onto the foot of the sheet.
+        html = build(sample_report(), sample_profile(address1="MG Road"))
+        self.assertIn(FOOTER_PAD, html)
+        self.assertLess(html.index(FOOTER_PAD), html.index("MG Road"))
+        self.assertGreater(html.index(FOOTER_PAD), html.index("End of Report"))
+
+    def test_no_marker_when_the_profile_has_no_footer(self):
+        self.assertNotIn(FOOTER_PAD, build(sample_report(), LabProfile()))
 
     def test_footer_is_escaped(self):
         self.assertIn("&lt;b&gt;", footer(sample_profile(timings="<b>")))
@@ -388,7 +496,7 @@ class SignatoryTests(unittest.TestCase):
 
     def test_roles_are_named(self):
         html = build(sample_report(), sample_profile(technician="S. Kumar"))
-        for role in ("Lab Technician", "Pathologist, MD"):
+        for role in ("Lab Technician", "Consultant Pathologist, MD"):
             self.assertIn(role, html)
 
     def test_nobody_is_named_as_billed_by(self):
@@ -415,7 +523,7 @@ class SignatoryTests(unittest.TestCase):
         empty = build(sample_report(), sample_profile(pathologist="",
                                                      pathologist_degrees=""))
         self.assertIn("Lab Technician", empty)
-        self.assertIn("Pathologist", empty)
+        self.assertIn("Consultant Pathologist", empty)
         self.assertNotIn("Dr. A. Rao", empty)
 
     def test_names_are_escaped(self):

@@ -1853,7 +1853,7 @@ class BillFieldTests(UICase):
         self.assertEqual(
             self.form.f_bill_date.dateTime().toString("dd-MM-yyyy"), "30-08-2026")
         self.assertEqual(self.form._collect_billing().bill_type, "Cash Bill")
-        self.assertIn("30-Aug-2026", self.form._bill_html())
+        self.assertIn("30 Aug 2026", self.form._bill_html())
 
     def test_the_profile_notes_reach_the_bill(self):
         self.storage.save_profile(LabProfile(
@@ -2342,9 +2342,8 @@ class ReportPageFitTests(UICase):
             pathologist="Dr. A. Rao", pathologist_degrees="MD", technician="S. Kumar",
             billed_by="Miss. Nethra", footer_note="Computer generated report.")
 
-    def _pages(self, panels):
-        from PySide6.QtPrintSupport import QPrinter
-        from app import printing, templates
+    def _html(self, panels):
+        from app import templates
         from app.models import BillItem, Billing, Report, TestRow
         from app.report_html import build
         rows = [TestRow(p, r["name"], "5.0", r["unit"], templates.ref_for(r, "F"),
@@ -2356,14 +2355,351 @@ class ReportPageFitTests(UICase):
                         billing=Billing(bill_no="B-1", bill_date="12-09-2026 08:05:00 AM",
                                         billed_by="Miss. Nethra", net_deposit="450",
                                         items=[BillItem(p, "450") for p in panels]))
+        return build(report, self._profile())
+
+    def _pages(self, panels):
+        from PySide6.QtPrintSupport import QPrinter
+        from app import printing
         printer = QPrinter(QPrinter.HighResolution)
         printer.setOutputFormat(QPrinter.PdfFormat)
         printing._configure(printer, printing.REPORT_PAGE)
-        return printing._document(build(report, self._profile()), printer,
+        return printing._document(self._html(panels), printer,
+                                  printing.REPORT_PAGE).pageCount()
+
+    def _pages_unpadded(self, panels):
+        """The same report with the footer left where it falls - the baseline
+        the padded document must not exceed."""
+        from PySide6.QtCore import QSizeF
+        from PySide6.QtPrintSupport import QPrinter
+        from app import printing, report_html
+        html = self._html(panels).replace(report_html.FOOTER_PAD, "")
+        printer = QPrinter(QPrinter.HighResolution)
+        printer.setOutputFormat(QPrinter.PdfFormat)
+        printing._configure(printer, printing.REPORT_PAGE)
+        rect = printer.pageRect(QPrinter.Point)
+        return printing._laid_out(html, QSizeF(rect.width(), rect.height()),
                                   printing.REPORT_PAGE).pageCount()
 
     def test_a_full_cbc_fits_one_page(self):
         self.assertEqual(self._pages([CBC]), 1)
 
+    def test_a_full_cbc_fits_one_page_for_a_wordy_profile_too(self):
+        """The reference profile is short. A real lab has a street address, a
+        landline and a mobile, a long email and opening hours, and that is what
+        fills the footer - so the sheet is measured against the wordy version,
+        which is the one with no room to spare."""
+        wordy = LabProfile(
+            lab_name="Hemavathi Diagnostics", lab_subtitle="Family Clinic",
+            address1="#12, MG Road, Bengaluru", phone="080 2555 1234",
+            mobile="9845012345", email="lab@hemavathi.in", reg_no="KA/1",
+            timings="Mon-Sat 7:00 AM - 8:00 PM", holidays="Sundays",
+            pathologist="Dr. A. Rao", pathologist_degrees="MD",
+            technician="S. Kumar", billed_by="Miss. Nethra",
+            footer_note="Computer generated report.")
+        original, self._profile = self._profile, lambda: wordy
+        try:
+            self.assertEqual(self._pages([CBC]), 1)
+        finally:
+            self._profile = original
+
+    def test_a_panel_that_runs_over_repeats_its_heading_on_the_next_page(self):
+        """Qt repeats a table's header rows on every page the table runs onto.
+        The panel title and the column headings are both in that header, so a
+        report long enough to need a second sheet carries them over instead of
+        starting mid-table with a bare row."""
+        from PySide6.QtGui import QTextTable
+        from PySide6.QtPrintSupport import QPrinter
+        from app import printing
+        panels = [CBC, "Lipid Profile", "Liver Function Test (LFT)",
+                  "Kidney Function Test (KFT)", "Thyroid Profile"]
+        printer = QPrinter(QPrinter.HighResolution)
+        printer.setOutputFormat(QPrinter.PdfFormat)
+        printing._configure(printer, printing.REPORT_PAGE)
+        doc = printing._document(self._html(panels), printer, printing.REPORT_PAGE)
+
+        self.assertGreater(doc.pageCount(), 1, "needs a report that spans pages")
+        results = [f for f in doc.rootFrame().childFrames()
+                   if isinstance(f, QTextTable)
+                   and f.columns() == printing.PANEL_COLUMNS]
+        self.assertEqual(len(results), len(panels))
+        for table in results:
+            # The title row and the column headings row - both repeated.
+            self.assertEqual(table.format().headerRowCount(), 2)
+
     def test_a_short_panel_fits_one_page(self):
         self.assertEqual(self._pages(["Blood Sugar"]), 1)
+
+    def test_the_footer_is_pushed_to_the_foot_of_the_sheet(self):
+        """A short report leaves most of the sheet empty; the footer should
+        still print at the bottom of it, not halfway up under the signatures."""
+        from PySide6.QtCore import QSizeF
+        from PySide6.QtPrintSupport import QPrinter
+        from app import printing, report_html, templates
+        from app.models import Report, TestRow
+        rows = [TestRow("Blood Sugar", r["name"], "5.0", r["unit"],
+                        templates.ref_for(r, "F"), r.get("kind", "test"))
+                for r in templates.rows_for("Blood Sugar")]
+        html = report_html.build(Report(report_no="BR-1", patient_name="Hemavathi",
+                                        rows=rows), self._profile())
+        printer = QPrinter(QPrinter.HighResolution)
+        printer.setOutputFormat(QPrinter.PdfFormat)
+        printing._configure(printer, printing.REPORT_PAGE)
+        rect = printer.pageRect(QPrinter.Point)
+        size = QSizeF(rect.width(), rect.height())
+
+        loose = printing._laid_out(html.replace(report_html.FOOTER_PAD, ""),
+                                   size, printing.REPORT_PAGE)
+        pinned = printing._document(html, printer, printing.REPORT_PAGE)
+
+        # Still one sheet, but the type now reaches the foot of it.
+        self.assertEqual(pinned.pageCount(), 1)
+        loose_h = loose.documentLayout().documentSize().height()
+        pinned_h = pinned.documentLayout().documentSize().height()
+        self.assertGreater(pinned_h, loose_h)
+        self.assertGreater(pinned_h, size.height() - 2 * printing.FOOT_CLEARANCE_PT)
+        self.assertLessEqual(pinned_h, size.height())
+
+    def test_a_report_that_needs_two_sheets_is_not_given_a_third(self):
+        self.assertEqual(self._pages([CBC, "Lipid Profile", "Thyroid Profile",
+                                      "Liver Function Test (LFT)"]),
+                         self._pages_unpadded([CBC, "Lipid Profile",
+                                               "Thyroid Profile",
+                                               "Liver Function Test (LFT)"]))
+
+
+
+def _spans(doc):
+    """Which page each panel starts and ends on, in the given layout."""
+    from app import printing
+    height = doc.pageSize().height()
+    return [(int(r.top() // height) + 1, int((r.bottom() - 1) // height) + 1)
+            for r in printing._panel_rects(doc)]
+
+
+class ReportPaginationTests(UICase):
+    """Where the page breaks fall when a report runs past one sheet."""
+
+    _profile = ReportPageFitTests._profile
+
+    def _layouts(self, rows, bill_panels=("X",)):
+        """(as Qt would break it, as the app prints it) for the same report."""
+        from PySide6.QtCore import QSizeF
+        from PySide6.QtPrintSupport import QPrinter
+        from app import printing, report_html
+        from app.models import BillItem, Billing, Report
+        report = Report(report_no="BR-1", patient_name="Hemavathi", rows=rows,
+                        billing=Billing(bill_no="B-1",
+                                        items=[BillItem(p, "450") for p in bill_panels]))
+        html = report_html.build(report, self._profile())
+        printer = QPrinter(QPrinter.HighResolution)
+        printer.setOutputFormat(QPrinter.PdfFormat)
+        printing._configure(printer, printing.REPORT_PAGE)
+        rect = printer.pageRect(QPrinter.Point)
+        size = QSizeF(rect.width(), rect.height())
+        printing._resolved.clear()
+        raw = printing._laid_out(html.replace(report_html.FOOTER_PAD, ""), size,
+                                 printing.REPORT_PAGE)
+        return raw, printing._document(html, printer, printing.REPORT_PAGE)
+
+    def _panel_spans(self, rows, panels_for_bill=("X",)):
+        printed = self._layouts(rows, panels_for_bill)[1]
+        return _spans(printed), printed.pageCount()
+
+    def test_a_panel_that_would_split_is_moved_to_the_next_page(self):
+        """A hand-added panel landing at the foot of the sheet. Left to Qt it
+        breaks, stranding rows overleaf under a repeated heading; the app moves
+        the whole panel over instead."""
+        from app import templates
+        from app.models import TestRow
+        rows = [TestRow(p, r["name"], "5.0", r["unit"], templates.ref_for(r, "F"),
+                        r.get("kind", "test"))
+                for p in (CBC, "Liver Function Test (LFT)")
+                for r in templates.rows_for(p)]
+        rows += [TestRow("new", f"New Test {i}", "", "", "") for i in range(10)]
+
+        raw, printed = self._layouts(rows, (CBC, "Liver Function Test (LFT)"))
+        # Qt on its own breaks the last panel over the boundary ...
+        self.assertEqual(_spans(raw)[-1], (1, 2))
+        # ... and the app carries it over whole.
+        self.assertEqual(_spans(printed)[-1], (2, 2))
+        for start, end in _spans(printed):
+            self.assertEqual(start, end, f"panel split across pages {start}-{end}")
+
+    def test_a_panel_too_tall_for_any_page_still_breaks(self):
+        """There is nowhere to move it to, so it breaks where it falls - and
+        keeps its repeating heading. It must not be shunted from page to page
+        looking for room that does not exist."""
+        from app.models import TestRow
+        rows = [TestRow("Giant", f"Test {i}", "1", "u", "0 - 2") for i in range(90)]
+        spans, pages = self._panel_spans(rows)
+        self.assertGreater(pages, 2)
+        self.assertEqual(spans[0][0], 1)
+        self.assertGreater(spans[0][1], spans[0][0])
+
+    def test_a_small_panel_after_an_oversized_one_is_still_kept_whole(self):
+        from app.models import TestRow
+        rows = [TestRow("Giant", f"Test {i}", "1", "u", "0 - 2") for i in range(90)]
+        rows += [TestRow("Tail", f"T{i}", "1", "u", "0 - 2") for i in range(4)]
+        spans, _ = self._panel_spans(rows)
+        self.assertEqual(spans[1][0], spans[1][1])
+
+    def test_many_small_panels_each_stay_whole(self):
+        from app.models import TestRow
+        rows = [TestRow(f"Panel {p}", f"T{i}", "1", "u", "0 - 2")
+                for p in range(10) for i in range(8)]
+        spans, pages = self._panel_spans(rows)
+        self.assertGreater(pages, 1)
+        for start, end in spans:
+            self.assertEqual(start, end)
+
+
+class TextAppearanceTests(UICase):
+    """The Text Appearance panel on the laboratory profile.
+
+    The screen's contract is narrow and worth pinning down: one control moves
+    one region, the preview is the real renderer rather than a lookalike, and a
+    control put back where it started leaves nothing behind in the profile.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.settings = self.window.settings
+        self.editor = self.settings.style_editor
+        self.settings.edits["lab_name"].setText("Test Lab")
+
+    def pick(self, key):
+        keys = [slot.key for slot in self._slots()]
+        self.editor.picker.setCurrentIndex(keys.index(key))
+
+    @staticmethod
+    def _slots():
+        from app import text_style
+
+        return text_style.SLOTS
+
+    # ------------------------------------------------------------- collecting
+    def test_centring_a_region_stores_only_that_region(self):
+        self.pick("footer")
+        self.editor.align_buttons["left"].setChecked(True)
+        self.editor._collect()
+        self.assertEqual(self.editor.styles(), {"footer": {"align": "left"}})
+
+    def test_putting_a_control_back_stores_nothing(self):
+        self.pick("footer")
+        self.editor.align_buttons["left"].setChecked(True)
+        self.editor._collect()
+        self.editor.align_buttons["center"].setChecked(True)   # where it began
+        self.editor._collect()
+        self.assertEqual(self.editor.styles(), {})
+
+    def test_the_controls_open_showing_what_the_report_already_does(self):
+        self.pick("lab_name")
+        self.assertTrue(self.editor.effect_buttons["bold"].isChecked())
+        self.assertTrue(self.editor.align_buttons["left"].isChecked())
+        self.pick("footer")
+        self.assertFalse(self.editor.effect_buttons["bold"].isChecked())
+        self.assertTrue(self.editor.align_buttons["center"].isChecked())
+
+    def test_a_font_and_a_size_are_stored_together(self):
+        self.pick("lab_name")
+        self.editor.font_box.setCurrentIndex(
+            self.editor.font_box.findData("Georgia"))
+        self.editor.size_box.setCurrentIndex(
+            self.editor.size_box.findData("22"))
+        self.assertEqual(self.editor.styles()["lab_name"],
+                         {"font": "Georgia", "size": "22"})
+
+    def test_a_colour_is_stored_and_can_be_put_back(self):
+        self.pick("footer")
+        self.editor._set_color("#8b0000")
+        self.editor._collect()
+        self.assertEqual(self.editor.styles(), {"footer": {"color": "#8b0000"}})
+        self.editor._clear_color()
+        self.assertEqual(self.editor.styles(), {})
+
+    def test_resetting_one_region_leaves_the_others(self):
+        self.pick("footer")
+        self.editor.effect_buttons["italic"].setChecked(True)
+        self.editor._collect()
+        self.pick("lab_name")
+        self.editor.align_buttons["center"].setChecked(True)
+        self.editor._collect()
+
+        self.editor._reset_one()
+        self.assertEqual(list(self.editor.styles()), ["footer"])
+
+    def test_resetting_everything_clears_the_lot(self):
+        self.pick("footer")
+        self.editor.effect_buttons["underline"].setChecked(True)
+        self.editor._collect()
+        self.editor._reset_all()
+        self.assertEqual(self.editor.styles(), {})
+
+    def test_the_reset_buttons_are_dead_until_there_is_something_to_reset(self):
+        self.pick("footer")
+        self.assertFalse(self.editor.reset_one.isEnabled())
+        self.assertFalse(self.editor.reset_all.isEnabled())
+        self.editor.effect_buttons["bold"].setChecked(True)
+        self.editor._collect()
+        self.assertTrue(self.editor.reset_one.isEnabled())
+        self.assertTrue(self.editor.reset_all.isEnabled())
+
+    # ---------------------------------------------------------------- saving
+    def test_the_styling_is_saved_with_the_profile(self):
+        self.pick("lab_name")
+        self.editor.align_buttons["center"].setChecked(True)
+        self.editor._collect()
+        self.settings.save()
+
+        self.storage.clear_cache()
+        profile = self.storage.load_profile()
+        self.assertEqual(profile.text_styles, {"lab_name": {"align": "center"}})
+
+    def test_the_saved_styling_comes_back_into_the_controls(self):
+        self.storage.save_profile(LabProfile(
+            lab_name="Test Lab", text_styles={"footer": {"align": "right",
+                                                         "italic": "1"}}))
+        self.settings.load()
+        self.pick("footer")
+        self.assertTrue(self.editor.align_buttons["right"].isChecked())
+        self.assertTrue(self.editor.effect_buttons["italic"].isChecked())
+
+    def test_a_styled_region_is_marked_in_the_picker(self):
+        """Otherwise the only way to find what was changed is to open all
+        eighteen regions in turn."""
+        self.pick("footer")
+        self.editor.effect_buttons["italic"].setChecked(True)
+        self.editor._collect()
+        index = self.editor.picker.currentIndex()
+        self.assertTrue(self.editor.picker.itemText(index).strip().endswith("*"))
+
+    # --------------------------------------------------------------- preview
+    def test_the_preview_shows_the_styling_as_it_is_chosen(self):
+        self.pick("lab_name")
+        self.editor.font_box.setCurrentIndex(
+            self.editor.font_box.findData("Georgia"))
+        self.assertIn("Georgia", self.settings.preview.toHtml())
+
+    def test_the_preview_is_rendered_by_the_real_report_builder(self):
+        """A preview kept in step with the printer by hand is one that will
+        eventually lie, so it goes through report_html like everything else."""
+        from app import report_html
+        from app.ui.settings_view import sample_document
+
+        expected = report_html.build(sample_document(),
+                                     self.settings.current_profile())
+        self.assertIn("Sample Patient", expected)
+        self.assertIn("Sample Patient", self.settings.preview.toHtml())
+
+    def test_the_styling_does_not_reach_the_bill(self):
+        """The bill is an accounting document on a ruled form and is left alone,
+        so one set of controls cannot quietly restyle two documents."""
+        from app import bill_html
+        from app.ui.settings_view import sample_document
+
+        self.pick("lab_name")
+        self.editor.font_box.setCurrentIndex(
+            self.editor.font_box.findData("Georgia"))
+        bill = bill_html.build(sample_document(),
+                               self.settings.current_profile())
+        self.assertNotIn("Georgia", bill)

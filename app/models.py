@@ -2,6 +2,8 @@
 from dataclasses import dataclass, field, asdict
 from typing import List, Dict, Any
 
+from . import text_style
+
 
 @dataclass
 class LabProfile:
@@ -26,13 +28,22 @@ class LabProfile:
     billed_by: str = ""         # default staff name on a new bill
     logo_path: str = ""
     signature_path: str = ""
+    # How each piece of text prints: alignment, font, size, colour and
+    # bold/italic/underline, per named region. Only what the lab changed is
+    # kept, so an empty dict means "print the way the document always did".
+    # Nested, unlike every other field here, because it is a table of slots -
+    # see app.text_style.
+    text_styles: Dict[str, Dict[str, str]] = field(default_factory=dict)
 
     @staticmethod
     def from_dict(d: Dict[str, Any]) -> "LabProfile":
         p = LabProfile()
         for k in p.__dict__:
+            if k == "text_styles":
+                continue        # a dict of dicts; str() would ruin it
             if k in d and d[k] is not None:
                 setattr(p, k, str(d[k]))
+        p.text_styles = text_style.load(d.get("text_styles"))
         return p
 
     def to_dict(self) -> Dict[str, Any]:
