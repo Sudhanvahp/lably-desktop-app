@@ -7,11 +7,10 @@ the pathologist's name underlined. So every text region of the report is a named
 colour and bold / italic / underline - exactly the handful of controls a
 spreadsheet offers, and for the same reason.
 
-This covers the **report** only. The bill is deliberately left alone: it is an
-accounting document that gets photocopied, faxed and filed, its layout is a
-ruled form the lab already issues, and giving one set of controls two documents
-to answer for meant the operator could never be sure which one a change would
-land on. The bill prints the way it always has.
+The report and the bill each have their own list of slots and their own
+stored styles (`text_styles` and `bill_text_styles`): one set of controls
+answering for two documents meant the operator could never be sure which one a
+change would land on, so each document is styled on its own.
 
 One rule keeps this from becoming a second, competing stylesheet: a slot stores
 only what the operator actually changed. Everything else stays blank and the
@@ -260,10 +259,65 @@ SLOTS: Tuple[Slot, ...] = (
 BY_KEY: Dict[str, Slot] = {slot.key: slot for slot in SLOTS}
 
 
+# The bill's own regions. Kept apart from the report's and stored apart too
+# (`bill_text_styles`), so a change made for one document can never land on the
+# other - the two are styled from two separate lists on the profile screen.
+BILL_SLOTS: Tuple[Slot, ...] = (
+    Slot("lab_name", "Laboratory name",
+         "the big line at the top of the bill",
+         ".labname", "center", bold=True),
+    Slot("lab_subtitle", "Sub-heading",
+         "the line under the laboratory name",
+         ".labsub", "center"),
+    Slot("heading", "Bill heading",
+         "the bill type printed as the title, e.g. Cash Bill",
+         ".heading", "center", bold=True),
+    Slot("label", "Patient and bill labels",
+         "Patient Name, Bill No, Bill Date - the words, not the values",
+         ".key, .colon", "left", bold=True),
+    Slot("value", "Patient and bill details",
+         "the patient's name, IDs, dates and the referring doctor",
+         ".val", "left"),
+    Slot("table_head", "Column headings",
+         "Sl. No., Services, Amount, Net Amount",
+         ".th", "left", bold=True),
+    Slot("services", "Services",
+         "each service name in the services table",
+         ".svc", "left", bold=True),
+    Slot("money", "Amounts and totals",
+         "every figure, Total Billed and the closing amounts",
+         ".money, .totlbl, .boxlbl", "right"),
+    Slot("words", "Amount in words",
+         "the amount spelled out under the services",
+         ".words", "left"),
+    Slot("notes", "Notes",
+         "the numbered terms at the foot of the bill",
+         ".notehead, .note", "left"),
+    Slot("billed_by", "Billed By",
+         "the Billed By line beside the notes",
+         ".billedby", "left"),
+    Slot("footer", "Footer",
+         "address, phone, email and timings at the very bottom",
+         ".labline", "center"),
+)
+
+BILL_BY_KEY: Dict[str, Slot] = {slot.key: slot for slot in BILL_SLOTS}
+
+REPORT, BILL = "report", "bill"
+
+
+def slots_for(doc: str = REPORT) -> Tuple[Slot, ...]:
+    return BILL_SLOTS if doc == BILL else SLOTS
+
+
+def by_key(doc: str = REPORT) -> Dict[str, Slot]:
+    return BILL_BY_KEY if doc == BILL else BY_KEY
+
+
 # --------------------------------------------------------------------------
 # reading and writing a whole profile's worth of styles
 # --------------------------------------------------------------------------
-def load(raw) -> Dict[str, Dict[str, str]]:
+def load(raw, doc: str = REPORT) -> Dict[str, Dict[str, str]]:
     """Validate whatever was on disk into styles this module will print.
 
     Unknown slot names are dropped rather than kept: a slot that no longer
@@ -273,7 +327,7 @@ def load(raw) -> Dict[str, Dict[str, str]]:
     if not isinstance(raw, dict):
         return out
     for key, value in raw.items():
-        if key not in BY_KEY:
+        if key not in by_key(doc):
             continue
         cleaned = TextStyle.from_dict(value).to_dict()
         if cleaned:
@@ -288,33 +342,34 @@ def style_of(styles, key: str) -> TextStyle:
     return TextStyle()
 
 
-def _styles_of(lab) -> Dict[str, Dict[str, str]]:
-    return getattr(lab, "text_styles", None) or {}
+def _styles_of(lab, doc: str = REPORT) -> Dict[str, Dict[str, str]]:
+    attr = "bill_text_styles" if doc == BILL else "text_styles"
+    return getattr(lab, attr, None) or {}
 
 
-def style_for(lab, key: str) -> TextStyle:
-    return style_of(_styles_of(lab), key)
+def style_for(lab, key: str, doc: str = REPORT) -> TextStyle:
+    return style_of(_styles_of(lab, doc), key)
 
 
-def align_for(lab, key: str) -> str:
+def align_for(lab, key: str, doc: str = REPORT) -> str:
     """The alignment attribute a block should carry.
 
     Qt's rich text honours a cell's or a div's `align` attribute over the
     stylesheet, so the alignment has to be written into the markup as well; the
     slot's own default is what the document did before this existed."""
-    slot = BY_KEY.get(key)
+    slot = by_key(doc).get(key)
     default = slot.align if slot else "left"
-    return style_for(lab, key).align or default
+    return style_for(lab, key, doc).align or default
 
 
-def effective(lab, key: str) -> TextStyle:
+def effective(lab, key: str, doc: str = REPORT) -> TextStyle:
     """A slot's style with the document's own defaults filled in.
 
     What the editor opens showing: the alignment and the three effects are never
     blank here, because the document always has an answer for them.
     """
-    slot = BY_KEY.get(key)
-    style = style_for(lab, key)
+    slot = by_key(doc).get(key)
+    style = style_for(lab, key, doc)
     if slot is None:
         return style
     return TextStyle(
@@ -328,14 +383,14 @@ def effective(lab, key: str) -> TextStyle:
     )
 
 
-def trimmed(key: str, style: TextStyle) -> Dict[str, str]:
+def trimmed(key: str, style: TextStyle, doc: str = REPORT) -> Dict[str, str]:
     """What is worth storing for a slot: only what differs from the document.
 
     A control put back where it started drops out entirely, so a slot the
     operator fiddled with and undid is indistinguishable from one they never
     touched - and the document stays free to change its own defaults later.
     """
-    slot = BY_KEY.get(key)
+    slot = by_key(doc).get(key)
     if slot is None:
         return {}
     kept = TextStyle(
@@ -351,17 +406,17 @@ def trimmed(key: str, style: TextStyle) -> Dict[str, str]:
     return kept.to_dict()
 
 
-def overrides(lab) -> str:
+def overrides(lab, doc: str = REPORT) -> str:
     """The lab's styling as a CSS block, to append after the report's own.
 
     Appended rather than merged: each rule then sits later in the sheet than the
     one it overrides, which is all it needs to win, and the report's own
     stylesheet stays readable as the thing it is - the default."""
-    styles = _styles_of(lab)
+    styles = _styles_of(lab, doc)
     if not styles:
         return ""
     rules: List[str] = []
-    for slot in SLOTS:
+    for slot in slots_for(doc):
         declarations = style_of(styles, slot.key).declarations()
         if declarations:
             rules.append(f"{slot.selector} {{ {declarations} }}")
@@ -370,14 +425,14 @@ def overrides(lab) -> str:
     return "\n/* the laboratory's own text styling */\n" + "\n".join(rules) + "\n"
 
 
-def stylesheet(base: str, lab) -> str:
-    """The report's stylesheet with the lab's own text styling applied."""
-    return base + overrides(lab)
+def stylesheet(base: str, lab, doc: str = REPORT) -> str:
+    """A document's stylesheet with the lab's own text styling applied."""
+    return base + overrides(lab, doc)
 
 
-def summary(lab, key: str) -> str:
+def summary(lab, key: str, doc: str = REPORT) -> str:
     """A one-line description of a slot's styling, for the editor's list."""
-    style = style_for(lab, key)
+    style = style_for(lab, key, doc)
     if style.is_plain():
         return "default"
     parts: List[str] = []
@@ -399,7 +454,7 @@ def summary(lab, key: str) -> str:
     return ", ".join(parts)
 
 
-def styled_slots(lab) -> List[str]:
+def styled_slots(lab, doc: str = REPORT) -> List[str]:
     """Which slots carry styling, in printing order."""
-    styles = _styles_of(lab)
-    return [slot.key for slot in SLOTS if styles.get(slot.key)]
+    styles = _styles_of(lab, doc)
+    return [slot.key for slot in slots_for(doc) if styles.get(slot.key)]

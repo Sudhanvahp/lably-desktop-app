@@ -204,3 +204,115 @@ class ProfileTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def _point_size(html: str, text: str) -> float:
+    from PySide6.QtGui import QTextDocument
+    from PySide6.QtWidgets import QApplication
+    # A full QApplication, not a QGuiApplication: the UI tests run later in
+    # the same process reuse whatever instance exists, and widgets need this one.
+    QApplication.instance() or QApplication([])
+    doc = QTextDocument()
+    doc.setHtml(html)
+    return doc.find(text).charFormat().fontPointSize()
+
+
+class SpecificityTests(unittest.TestCase):
+    """Qt ranks CSS by specificity, so an override that is merely later in the
+    sheet loses to a more specific base rule. Checked in a real QTextDocument."""
+
+    def test_a_size_set_for_the_results_reaches_the_results_table(self):
+        html = report_html.build(report(), profile(table_body={"size": "14"}))
+        self.assertEqual(_point_size(html, "Haemoglobin"), 14.0)
+
+    def test_a_size_set_for_panel_titles_reaches_them(self):
+        html = report_html.build(report(), profile(panel_title={"size": "15"}))
+        self.assertEqual(_point_size(html, "CBC"), 15.0)
+
+
+def bill_profile(**styles) -> LabProfile:
+    lab = profile()
+    lab.bill_text_styles = styles
+    return lab
+
+
+class BillSlotTests(unittest.TestCase):
+    def test_doc_picks_the_bill_list(self):
+        self.assertIs(TS.slots_for(TS.BILL), TS.BILL_SLOTS)
+        self.assertIs(TS.slots_for(), TS.SLOTS)
+        self.assertIn("services", TS.by_key(TS.BILL))
+        self.assertNotIn("services", TS.by_key())
+
+    def test_bill_keys_are_unique(self):
+        keys = [slot.key for slot in TS.BILL_SLOTS]
+        self.assertEqual(len(keys), len(set(keys)))
+
+    def test_load_keeps_bill_slots_only_for_the_bill(self):
+        raw = {"services": {"bold": "1"}, "doc_title": {"bold": "1"}}
+        self.assertEqual(TS.load(raw, TS.BILL), {"services": {"bold": "1"}})
+        self.assertEqual(TS.load(raw), {"doc_title": {"bold": "1"}})
+
+    def test_bill_styles_do_not_reach_the_report_and_vice_versa(self):
+        lab = bill_profile(footer={"italic": "1"})
+        self.assertIn(".labline", TS.overrides(lab, TS.BILL))
+        self.assertEqual(TS.overrides(lab), "")
+        lab = profile(footer={"italic": "1"})
+        self.assertEqual(TS.overrides(lab, TS.BILL), "")
+
+    def test_bill_defaults_come_from_the_bill_slot(self):
+        lab = bill_profile()
+        self.assertEqual(TS.align_for(lab, "lab_name", TS.BILL), "center")
+        self.assertEqual(TS.align_for(lab, "lab_name"), "left")
+        self.assertEqual(TS.effective(lab, "heading", TS.BILL).bold, TS.ON)
+
+    def test_trimmed_against_the_bill_defaults(self):
+        same = TS.TextStyle(align="center", bold="1")
+        self.assertEqual(TS.trimmed("lab_name", same, TS.BILL), {})
+        self.assertEqual(TS.trimmed("lab_name", same),
+                         {"align": "center"})
+
+    def test_summary_and_styled_slots_for_the_bill(self):
+        lab = bill_profile(money={"size": "9"}, lab_name={"align": "left"})
+        self.assertEqual(TS.summary(lab, "money", TS.BILL), "9pt")
+        self.assertEqual(TS.styled_slots(lab, TS.BILL), ["lab_name", "money"])
+
+    def test_every_bill_selector_names_a_class_the_bill_prints(self):
+        from app.models import BillItem
+        r = report()
+        r.billing.items = [BillItem("CBC", "300")]
+        # A class the stylesheet styles, or one the markup carries.
+        html = bill_html.build(r, profile())
+        for slot in TS.BILL_SLOTS:
+            for one in (part.strip() for part in slot.selector.split(",")):
+                cls = one.lstrip(".")
+                self.assertRegex(html, rf'(class="[^"]*\b{cls}\b|\.{cls} )',
+                                 f"{slot.key}: {one}")
+
+    def test_injection_through_bill_styles_is_cleaned(self):
+        lab = bill_profile(footer={"color": "red;} body{display:none",
+                                   "font": "x'; }"})
+        self.assertEqual(TS.overrides(lab, TS.BILL), "")
+
+
+class BillAlignmentReachesMarkupTests(unittest.TestCase):
+    """Qt ignores CSS text-align in table cells; the attribute must be set."""
+
+    def test_unstyled_bill_has_no_extra_align_and_centred_headings(self):
+        html = bill_html.build(report(), bill_profile())
+        self.assertIn('<td class="key">Patient Name</td>', html)
+        self.assertIn('<td class="key billedby">Billed By</td>', html)
+        self.assertIn('align="center" class="th">Sl. No.', html)
+        self.assertIn('align="center" class="th">Net Amount', html)
+
+    def test_label_value_and_billed_by_alignment_reach_the_cells(self):
+        html = bill_html.build(report(), bill_profile(
+            label={"align": "right"}, value={"align": "center"},
+            billed_by={"align": "right"}))
+        self.assertIn('<td class="key" align="right">Patient Name</td>', html)
+        self.assertIn('<td width="100%" align="center" class="val', html)
+        self.assertIn('<td class="key billedby" align="right">Billed By</td>', html)
+
+    def test_heading_alignment_reaches_every_heading(self):
+        html = bill_html.build(report(), bill_profile(table_head={"align": "right"}))
+        for text in ("Sl. No.", "Services", "Amount", "Net Amount"):
+            self.assertIn(f'align="right" class="th">{text}<', html)

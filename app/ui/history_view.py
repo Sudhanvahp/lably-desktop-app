@@ -2,6 +2,7 @@
 from datetime import date
 
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QAbstractItemView, QCheckBox, QFileDialog, QHBoxLayout, QHeaderView, QLabel,
     QLineEdit, QMessageBox, QStackedWidget, QTableWidget, QTableWidgetItem,
@@ -121,6 +122,11 @@ class HistoryView(QWidget):
         table.horizontalHeader().setHighlightSections(False)
         table.doubleClicked.connect(self._double_clicked)
         table.itemChanged.connect(self._item_changed)
+        # Enter on a row opens it, the keyboard twin of a double-click.
+        enter = QShortcut(QKeySequence(Qt.Key_Return), table, self.open_selected)
+        enter.setContext(Qt.WidgetShortcut)
+        enter_pad = QShortcut(QKeySequence(Qt.Key_Enter), table, self.open_selected)
+        enter_pad.setContext(Qt.WidgetShortcut)
         return table
 
     def _build_action_bar(self) -> QHBoxLayout:
@@ -137,7 +143,7 @@ class HistoryView(QWidget):
         row.addWidget(self.selection_label)
 
         self.delete_selected_btn = icon_button(
-            "trash", "Delete Selected", "Permanently delete the ticked reports", "Danger")
+            "trash", "Delete Selected", "Permanently delete the ticked reports - tick them in the first column", "Danger")
         self.delete_selected_btn.setEnabled(False)
         self.delete_selected_btn.clicked.connect(self.delete_checked)
         row.addWidget(self.delete_selected_btn)
@@ -151,11 +157,11 @@ class HistoryView(QWidget):
             "exporting or reprinting")
         row.addWidget(self.attach_bill)
         for icon_name, text, tip, slot, kind in (
-            ("copy", "Duplicate", "Same patient, blank results", self.duplicate_selected, "Danger"),
+            ("copy", "Duplicate", "Same patient, blank results", self.duplicate_selected, ""),
             ("preview", "Preview", "See it before printing", self.preview_selected, ""),
             ("pdf", "Export PDF", "Save as a PDF file", self.export_selected, ""),
             ("printer", "Reprint", "Send to the printer again", self.print_selected, ""),
-            ("open", "Open", "Load it back into the form", self.open_selected, "Primary"),
+            ("open", "Open", "Load it back into the form (Enter or double-click)", self.open_selected, "Primary"),
         ):
             button = icon_button(icon_name, text, tip, kind)
             if kind == "Primary":
@@ -177,7 +183,16 @@ class HistoryView(QWidget):
         return [e for e in self.entries
                 if any(term in str(e.get(f, "")).lower() for f in fields)]
 
+    def _current_id(self) -> str:
+        r = self.table.currentRow()
+        item = self.table.item(r, CHECK) if r >= 0 else None
+        return item.data(Qt.UserRole) if item else ""
+
     def _refill(self):
+        # The highlighted row is remembered by report id, not row number: a
+        # search or a reload shifts rows, and Open / Reprint must never land
+        # on whichever different report slid into the old position.
+        keep = self._current_id()
         self._filling = True
         rows = self._visible_entries()
         self.table.setRowCount(len(rows))
@@ -205,9 +220,21 @@ class HistoryView(QWidget):
         self.table.horizontalHeader().setSectionResizeMode(PATIENT, QHeaderView.Stretch)
         self.count.setText(f"{len(rows)} of {len(self.entries)} shown")
         self._filling = False
+        self._restore_current(keep)
         self._show_right_page(len(rows))
         self._refresh_stats()
         self._selection_changed()
+
+    def _restore_current(self, report_id: str):
+        self.table.setCurrentIndex(self.table.model().index(-1, -1))
+        self.table.clearSelection()
+        if not report_id:
+            return
+        for r in range(self.table.rowCount()):
+            item = self.table.item(r, CHECK)
+            if item is not None and item.data(Qt.UserRole) == report_id:
+                self.table.selectRow(r)
+                return
 
     def _show_right_page(self, visible: int):
         """A blank grid tells the operator nothing; say which kind of empty it is."""

@@ -182,3 +182,18 @@ class RobustnessTests(SandboxCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class NullFieldTests(SandboxCase):
+    def test_null_fields_read_as_blank_not_none(self):
+        row = templates.clean_row({"kind": "test", "name": None, "unit": None,
+                                   "ref_m": None, "ref_f": None})
+        self.assertEqual((row["name"], row["unit"], row["ref_m"], row["ref_f"]),
+                         ("", "", "", ""))
+
+    def test_a_null_price_is_no_price(self):
+        import json, os
+        from app import storage
+        with open(os.path.join(storage.app_dir(), templates.FILENAME), "w") as fh:
+            json.dump({"prices": {"Lipid Profile": None}}, fh)
+        self.assertEqual(templates.price_for("Lipid Profile"), "")

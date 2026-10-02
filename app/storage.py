@@ -50,9 +50,24 @@ def _read_json(path: str, default: Any) -> Any:
 def _write_json(path: str, data: Any) -> None:
     ensure_dirs()
     tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as fh:
-        json.dump(data, fh, indent=2, ensure_ascii=False)
-    os.replace(tmp, path)
+    try:
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(data, fh, indent=2, ensure_ascii=False)
+            # Flushed to the disk before the rename: without it a power cut
+            # just after os.replace can leave the *new* name pointing at an
+            # empty file, which is the half-written report this is here to
+            # prevent.
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, path)
+    except BaseException:
+        # A failed dump (unserialisable value, full disk) must not leave a
+        # stray .tmp behind; the original file is untouched either way.
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
 
 
 # --------------------------------------------------------------------------
@@ -218,6 +233,10 @@ def load_index() -> List[Dict[str, Any]]:
         idx = _read_json(_p("index.json"), None)
         if not isinstance(idx, list):
             idx = rebuild_index()
+        else:
+            # A hand-edited index can hold a stray non-object; every caller
+            # does entry.get(...), so one would take the whole history down.
+            idx = [e for e in idx if isinstance(e, dict)]
         _cache["index"] = idx
     return _cache["index"]
 
@@ -477,7 +496,13 @@ def delete_reports(report_ids: List[str]) -> int:
             removed += 1
         except OSError:
             pass
-    _save_index([e for e in load_index() if e.get("id") not in targets])
+    # Only drop from the index what is really gone. A file Windows would not
+    # let go of (open in an editor, held by a sync client) stays listed, so it
+    # neither vanishes from History while still on disk nor comes back
+    # unannounced the next time the index is rebuilt.
+    gone = {rid for rid in targets
+            if not os.path.exists(os.path.join(reports_dir(), rid + ".json"))}
+    _save_index([e for e in load_index() if e.get("id") not in gone])
     return removed
 
 

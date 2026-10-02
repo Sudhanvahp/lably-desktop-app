@@ -99,6 +99,8 @@ class Sidebar(QFrame):
             ("lab", "  Laboratory Profile"),
         )):
             button = NavButton(icon_name, label)
+            # the Go menu's Ctrl+1..4 were invisible unless the menu was opened
+            button.setToolTip(f"{label.strip()} (Ctrl+{index + 1})")
             button.clicked.connect(lambda _, i=index: self.navigated.emit(i))
             self.group.addButton(button, index)
             self.buttons.append(button)

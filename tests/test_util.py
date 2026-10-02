@@ -40,3 +40,11 @@ class SafeFilenameTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ReservedNameTests(unittest.TestCase):
+    def test_windows_device_names_are_made_ordinary(self):
+        for name in ("CON", "nul", "Com1", "LPT9.pdf"):
+            self.assertNotIn(safe_filename(name).split(".")[0].upper(),
+                             {"CON", "NUL", "COM1", "LPT9"}, name)
+        self.assertEqual(safe_filename("Connie"), "Connie")

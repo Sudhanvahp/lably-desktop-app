@@ -5,17 +5,18 @@ from PySide6.QtCore import Qt, QUrl, Signal
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QFileDialog, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit,
-    QMessageBox, QPushButton, QScrollArea, QTextBrowser, QTextEdit,
+    QMessageBox, QPushButton, QScrollArea, QTabWidget, QTextBrowser, QTextEdit,
     QVBoxLayout, QWidget,
 )
 
-from .. import report_html, security, storage
+from .. import bill_html, report_html, security, storage, text_style
 from ..billing import DEFAULT_BILL_NOTES
 from ..models import BillItem, Billing, LabProfile, Report, TestRow
 from .. import validators as V
 from . import icons
 from .text_style_editor import TextStyleEditor
-from .theme import MUTED, S2, S3
+from .theme import (ACCENT, ACCENT_DARK, ACCENT_SOFT, FIELD_LINE, INK_SOFT,
+                    MUTED, S2, S3, SURFACE_ALT)
 from .widgets import Card, PageHeader, icon_button
 
 IMAGE_FILTER = "Images (*.png *.jpg *.jpeg *.bmp *.gif)"
@@ -198,6 +199,10 @@ class SettingsView(QWidget):
             "One note per line, e.g.\n"
             "Please bring receipt while collecting the report\n"
             "Working Hours : Weekdays : 7.00 am to 9.00 pm")
+        # The notes print at the foot of the bill, so the Bill Preview must
+        # follow them as they are typed like every other field does - before,
+        # it kept showing the old notes until some other field was touched.
+        self.bill_notes.textChanged.connect(self._refresh_preview)
         # The standard terms are one click away rather than magically appearing
         # whenever the box is empty. Prefilling on every blank would mean a lab
         # could never keep the notes cleared: the moment they saved anything
@@ -233,20 +238,77 @@ class SettingsView(QWidget):
                    "printed on every report and every bill")
         box.add(form)
 
+        # The report and the bill each have their own appearance editor and
+        # preview. Stacked one after another they made this page four screens
+        # long, and it was easy to style the report while looking at the bill.
+        # One card with a tab each keeps every control, pairs each editor with
+        # the preview it drives, and halves the scrolling.
         self.style_editor = TextStyleEditor()
         self.style_editor.changed.connect(self._refresh_preview)
-        style_box = Card("Text Appearance",
-                         "alignment, font, size, colour and bold / italic / "
-                         "underline, region by region")
-        style_box.add(self.style_editor)
-
         self.preview = QTextBrowser()
         self.preview.setMinimumHeight(460)
-        preview_box = Card("Report Preview",
-                           "exactly how the sheet will print, with your own "
-                           "styling",
-                           elevated=False)
-        preview_box.add(self.preview)
+
+        # The bill is styled on its own, from its own list of regions, so a
+        # change made here can never move anything on the report - or back.
+        self.bill_style_editor = TextStyleEditor(doc=text_style.BILL)
+        self.bill_style_editor.changed.connect(self._refresh_preview)
+        self.bill_preview = QTextBrowser()
+        self.bill_preview.setMinimumHeight(420)
+
+        self.appearance_tabs = QTabWidget()
+        self.appearance_tabs.setDocumentMode(True)
+        for editor, preview, tab, caption in (
+                (self.style_editor, self.preview, "Report",
+                 "Report Preview - exactly how the sheet will print"),
+                (self.bill_style_editor, self.bill_preview, "Cash Bill",
+                 "Bill Preview - exactly how the bill will print")):
+            page = QWidget()
+            column = QVBoxLayout(page)
+            column.setContentsMargins(0, S2, 0, 0)
+            column.setSpacing(S2)
+            column.addWidget(editor)
+            label = QLabel(caption)
+            label.setObjectName("Hint")
+            column.addWidget(label)
+            column.addWidget(preview)
+            self.appearance_tabs.addTab(page, tab)
+        self.appearance_tabs.setTabToolTip(
+            0, "Alignment, font, size and colour for the lab report")
+        self.appearance_tabs.setTabToolTip(
+            1, "The same controls, for the Cash Bill only")
+        # The app theme has no tab styling, and Qt's own flat document-mode
+        # tabs all but vanish on a white card - operators could not find the
+        # Cash Bill side at all. Big pill tabs, the chosen one filled, read as
+        # the two choices they are.
+        self.appearance_tabs.setDocumentMode(False)
+        self.appearance_tabs.tabBar().setCursor(Qt.PointingHandCursor)
+        self.appearance_tabs.tabBar().setExpanding(False)
+        self.appearance_tabs.setStyleSheet(f"""
+            QTabWidget::pane {{ border: none; border-top: 2px solid {ACCENT};
+                                top: -2px; }}
+            QTabBar::tab {{
+                background: {SURFACE_ALT}; color: {INK_SOFT};
+                border: 1.5px solid {FIELD_LINE}; border-bottom: none;
+                border-top-left-radius: 10px; border-top-right-radius: 10px;
+                padding: 10px 34px; margin-right: 6px; min-width: 120px;
+                font-size: 11pt; font-weight: 600;
+            }}
+            QTabBar::tab:hover:!selected {{
+                background: {ACCENT_SOFT}; color: {ACCENT_DARK};
+                border-color: {ACCENT};
+            }}
+            QTabBar::tab:selected {{
+                background: {ACCENT}; color: #ffffff; border-color: {ACCENT};
+            }}
+        """)
+        style_box = Card("Text Appearance",
+                         "alignment, font, size, colour and bold / italic / "
+                         "underline, region by region - pick Report or Cash "
+                         "Bill below",
+                         # holds the two previews, which are scroll areas: a
+                         # drop shadow makes them paint outside the card
+                         elevated=False)
+        style_box.add(self.appearance_tabs)
 
         save = icon_button("save", "Save Laboratory Profile", "", "Primary")
         save.setIcon(icons.icon("save", "#ffffff", 17))
@@ -259,7 +321,6 @@ class SettingsView(QWidget):
         layout.setContentsMargins(0, 2, 2, 2)
         layout.addWidget(box)
         layout.addWidget(style_box)
-        layout.addWidget(preview_box)
         layout.addWidget(self._build_security_box())
         layout.addStretch(1)
 
@@ -485,7 +546,67 @@ class SettingsView(QWidget):
         self.technician_signature.set_path(profile.technician_signature_path)
         self.backup_edit.setText(profile.backup_dir)
         self.style_editor.set_styles(profile.text_styles)
+        self.bill_style_editor.set_styles(profile.bill_text_styles)
         self._refresh_preview()
+        self._mark_saved()
+
+    # ---------------------------------------------------------- unsaved edits
+    def _snapshot(self) -> dict:
+        return dict(vars(self.current_profile()))
+
+    def _mark_saved(self):
+        """Remember what is on screen as the saved state.
+
+        Taken from the screen rather than from the stored profile, so that what
+        load() fills in on a first run (the standard bill notes) does not count
+        as an unsaved change nobody made."""
+        self._saved_snapshot = self._snapshot()
+
+    def has_unsaved_changes(self) -> bool:
+        """True when the screen differs from what was last loaded or saved.
+
+        The main window asks before closing on these: the profile is only
+        written by the Save button, and closing used to drop an afternoon of
+        letterhead and styling work without a word."""
+        saved = getattr(self, "_saved_snapshot", None)
+        return saved is not None and self._snapshot() != saved
+
+    # Which field each save() complaint is about. Matched on the label text
+    # the validators put in their messages. The old guess split key names on
+    # "_" and looked for "lab" - which is also inside "laboratory phone
+    # number", so a bad phone number put the cursor in the lab name. Footer,
+    # backup and bill-note messages are handled first in _field_for.
+    _PROBLEM_FIELDS = (
+        ("laboratory name", "lab_name"),
+        ("sub-heading", "lab_subtitle"),
+        ("address line 1", "address1"),
+        ("address line 2", "address2"),
+        ("laboratory phone", "phone"),
+        ("mobile", "mobile"),
+        ("lab timings", "timings"),
+        ("holidays", "holidays"),
+        ("email", "email"),
+        ("pathologist's name", "pathologist"),
+        ("technician's name", "technician"),
+        ("degrees", "pathologist_degrees"),
+        ("footer note", "footer_note"),
+    )
+
+    def _field_for(self, problem: str):
+        text = problem.lower()
+        if "footer note" in text:
+            return self.edits["footer_note"]
+        # Matched on the exact labels save() hands the validators and the
+        # wording of storage.check_backup_dir - a bare "note" / "folder" also
+        # caught unrelated messages and sent the cursor to the wrong box.
+        if "backup folder" in text:
+            return self.backup_edit
+        if "bill note" in text:
+            return self.bill_notes
+        for needle, key in self._PROBLEM_FIELDS:
+            if needle in text:
+                return self.edits[key]
+        return None
 
     def current_profile(self) -> LabProfile:
         profile = LabProfile()
@@ -502,6 +623,8 @@ class SettingsView(QWidget):
         profile.backup_dir = self.backup_edit.text().strip()
         profile.text_styles = (self.style_editor.styles()
                                if self.style_editor else {})
+        bill_editor = getattr(self, "bill_style_editor", None)
+        profile.bill_text_styles = bill_editor.styles() if bill_editor else {}
         return profile
 
     def _refresh_preview(self):
@@ -510,11 +633,14 @@ class SettingsView(QWidget):
         Through `report_html.build` rather than through a mock-up of it: a
         preview that agrees with the printer only because someone kept two
         layouts in step is a preview that will eventually lie."""
-        if self.preview is None:
+        if self.preview is None or getattr(self, "bill_preview", None) is None:
             return          # still being built; load() renders the first one
+        profile = self.current_profile()
+        sample = sample_document()
         self.preview.setHtml(
-            report_html.build(sample_document(), self.current_profile())
+            report_html.build(sample, profile)
             .replace(report_html.FOOTER_PAD, ""))
+        self.bill_preview.setHtml(bill_html.build(sample, profile))
 
     def save(self):
         profile = self.current_profile()
@@ -538,13 +664,25 @@ class SettingsView(QWidget):
         )
         if problem:
             self.notify.emit(problem, "warning")
-            for key in ("lab_name", "mobile", "phone", "email", "pathologist"):
-                if key.split("_")[0] in problem.lower() or (
-                        key == "lab_name" and "laboratory" in problem.lower()):
-                    self.edits[key].setFocus()
-                    break
+            field = self._field_for(problem)
+            if field is not None:
+                field.setFocus()
+                if isinstance(field, QLineEdit):
+                    field.selectAll()
             return
-        storage.save_profile(profile)
+        try:
+            storage.save_profile(profile)
+        except OSError as exc:
+            # Disk full or a locked file used to escape as an exception - and
+            # from the close prompt the window then shut with the edits lost.
+            self.notify.emit(
+                "Could not save the profile: "
+                f"{getattr(exc, 'strerror', None) or exc}. Check that the data "
+                f"folder ({storage.app_dir()}) is writable, then save again.",
+                "error")
+            return False
         for key in PHONE_FIELDS:
             self.edits[key].setText(getattr(profile, key))
+        self._mark_saved()
         self.profile_saved.emit()
+        return True

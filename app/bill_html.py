@@ -20,12 +20,14 @@ rules are real table borders with an explicit colour, because Qt paints an
 unstyled border in its own grey.
 """
 from html import escape
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 from .billing import (DEFAULT_BILL_TYPE, amount_in_words, deposit,
                       format_amount, format_bill_date, net_payable,
                       parse_amount, summary, total_billed)
 from .models import LabProfile, Report
+from . import text_style
+from .text_style import BILL
 
 INK = "#000000"
 PAPER = "#ffffff"
@@ -72,12 +74,16 @@ def _hrule() -> str:
 def letterhead(lab: LabProfile) -> str:
     """Centred, black, no logo: the name and its sub-heading, nothing else -
     the same top as the report. Contact details print in the footer."""
+    name_align = text_style.align_for(lab, "lab_name", BILL)
+    sub_align = text_style.align_for(lab, "lab_subtitle", BILL)
     lines = [
-        f'<div class="labname">{escape(lab.lab_name or "LABORATORY NAME")}</div>'
+        f'<div class="labname" align="{name_align}">'
+        f'{escape(lab.lab_name or "LABORATORY NAME")}</div>'
     ]
     if lab.lab_subtitle:
-        lines.append(f'<div class="labsub">{escape(lab.lab_subtitle)}</div>')
-    return f'<div align="center">{"".join(lines)}</div>'
+        lines.append(f'<div class="labsub" align="{sub_align}">'
+                     f'{escape(lab.lab_subtitle)}</div>')
+    return "".join(lines)
 
 
 def footer(lab: LabProfile) -> str:
@@ -98,13 +104,15 @@ def footer(lab: LabProfile) -> str:
         lines.append(" &middot; ".join(hours))
     if not lines:
         return ""
-    return '<div align="center">' + "".join(
-        f'<div class="labline">{line}</div>' for line in lines) + "</div>"
+    align = text_style.align_for(lab, "footer", BILL)
+    return "".join(
+        f'<div class="labline" align="{align}">{line}</div>' for line in lines)
 
 
-def _heading(r: Report) -> str:
+def _heading(r: Report, lab: LabProfile) -> str:
     """The bill type doubles as the document's title, as on the slip."""
-    return (f'<div class="heading" align="center">'
+    align = text_style.align_for(lab, "heading", BILL)
+    return (f'<div class="heading" align="{align}">'
             f'{escape(r.billing.bill_type or DEFAULT_BILL_TYPE)}</div>')
 
 
@@ -114,7 +122,17 @@ def _age_sex(r: Report) -> str:
     return " / ".join(part for part in (age, sex) if part)
 
 
-def _identity(r: Report) -> str:
+def _set_align(lab: LabProfile, key: str) -> str:
+    """An align attribute for a slot the lab has aligned itself, else "".
+
+    Qt ignores CSS text-align in these table cells, so a chosen alignment has to
+    be written into the markup; an unstyled slot adds nothing, leaving the bill
+    exactly as it always printed."""
+    chosen = text_style.style_for(lab, key, BILL).align
+    return f' align="{chosen}"' if chosen else ""
+
+
+def _identity(r: Report, lab: Optional[LabProfile] = None) -> str:
     """Patient on the left, bill on the right, four rows each.
 
     Blank rows are kept rather than dropped: the two columns are read across, and
@@ -144,6 +162,9 @@ def _identity(r: Report) -> str:
         ("", "", False, False),
     ]
 
+    key_align = _set_align(lab, "label") if lab else ""
+    val_align = _set_align(lab, "value") if lab else ""
+
     def row(key: str, value: str, heavy: bool, tight: bool) -> str:
         if not key:
             # A filler row keeps the two columns four rows tall each, so the
@@ -154,9 +175,9 @@ def _identity(r: Report) -> str:
             shown = f"<b>{shown}</b>"
         return (
             "<tr>"
-            f'<td class="key">{escape(key)}</td>'
-            f'<td class="colon">:</td>'
-            f'<td width="100%" class="{"val tight" if tight else "val"}">'
+            f'<td class="key"{key_align}>{escape(key)}</td>'
+            f'<td class="colon"{key_align}>:</td>'
+            f'<td width="100%"{val_align} class="{"val tight" if tight else "val"}">'
             f"{shown}</td></tr>"
         )
 
@@ -177,7 +198,7 @@ def _identity(r: Report) -> str:
     )
 
 
-def _services(r: Report) -> str:
+def _services(r: Report, lab: LabProfile) -> str:
     """The ruled services table, closed by the Total Billed row.
 
     Amount and Net Amount carry the same figure. Per-line adjustments are out of
@@ -185,12 +206,18 @@ def _services(r: Report) -> str:
     columns, and dropping one would mean re-cutting the table the day a discount
     is specified.
     """
+    head = text_style.align_for(lab, "table_head", BILL)
+    # Sl. No. and the two amount headings sit centred over their columns unless
+    # the lab has aligned the headings itself; then all four follow it.
+    edge = text_style.style_for(lab, "table_head", BILL).align or "center"
+    svc = text_style.align_for(lab, "services", BILL)
+    money = text_style.align_for(lab, "money", BILL)
     rows = [
         "<tr>"
-        f'<td width="{W_SERIAL}" align="center" class="th">Sl. No.</td>'
-        f'<td width="{W_SERVICE}" class="th">Services</td>'
-        f'<td width="{W_AMOUNT}" align="center" class="th">Amount</td>'
-        f'<td width="{W_NET}" align="center" class="th">Net Amount</td>'
+        f'<td width="{W_SERIAL}" align="{edge}" class="th">Sl. No.</td>'
+        f'<td width="{W_SERVICE}" align="{head}" class="th">Services</td>'
+        f'<td width="{W_AMOUNT}" align="{edge}" class="th">Amount</td>'
+        f'<td width="{W_NET}" align="{edge}" class="th">Net Amount</td>'
         "</tr>"
     ]
     for i, item in enumerate(r.billing.items, start=1):
@@ -201,22 +228,22 @@ def _services(r: Report) -> str:
         rows.append(
             "<tr>"
             f'<td align="center" class="td">{i}</td>'
-            f'<td class="td"><b>{escape(item.service)}</b></td>'
-            f'<td align="right" class="money">{text}</td>'
-            f'<td align="right" class="money">{text}</td>'
+            f'<td align="{svc}" class="td svc">{escape(item.service)}</td>'
+            f'<td align="{money}" class="money">{text}</td>'
+            f'<td align="{money}" class="money">{text}</td>'
             "</tr>"
         )
 
     total = format_amount(total_billed(r.billing))
     rows.append(
         '<tr><td colspan="2" align="center" class="totlbl"><b>Total Billed</b></td>'
-        f'<td align="right" class="money"><b>{total}</b></td>'
-        f'<td align="right" class="money"><b>{total}</b></td></tr>'
+        f'<td align="{money}" class="money"><b>{total}</b></td>'
+        f'<td align="{money}" class="money"><b>{total}</b></td></tr>'
     )
     return _box("".join(rows))
 
 
-def _closing(r: Report) -> str:
+def _closing(r: Report, lab: LabProfile) -> str:
     """Paid-in-words on the left, the three closing figures ruled on the right.
 
     The block is sized to its own labels rather than to a fixed percentage: the
@@ -224,19 +251,17 @@ def _closing(r: Report) -> str:
     stronger constraint than a column boundary that merely looks tidy.
     """
     figures = summary(r.billing)
+    money = text_style.align_for(lab, "money", BILL)
     rows = "".join(
         f'<tr><td class="boxlbl"><b>{label}</b></td>'
-        f'<td align="right" class="money"><b>'
+        f'<td align="{money}" class="money"><b>'
         f"{format_amount(figures[key])}</b></td></tr>"
         for label, key in (("Net Payable Amt", "net_payable"),
                            ("Net Deposit Amt", "net_deposit"),
                            ("Balance", "balance"))
     )
 
-    # What the bill comes to, in words, always. This is the figure the words are
-    # there to protect - a total can be altered after the fact with one pen
-    # stroke and a sentence cannot - so it is stated whether or not anything has
-    # been paid yet.
+    # The total in words is `_amount_words`, on its own line above this block.
     # What was handed over, in words, but only when something was. On an
     # unsettled bill "Paid Amount : Zero Rupees Only" says nothing the Balance
     # has not already said.
@@ -256,7 +281,7 @@ def _closing(r: Report) -> str:
     )
 
 
-def _amount_words(r: Report) -> str:
+def _amount_words(r: Report, lab: LabProfile) -> str:
     """What the bill comes to, spelled out, on a line of its own.
 
     Always printed, whether or not anything has been paid: a total can be altered
@@ -269,7 +294,8 @@ def _amount_words(r: Report) -> str:
     across two lines on any bill over a few thousand rupees.
     """
     return (
-        f'<div class="words"><span class="key">Amount in Words</span>&nbsp;: '
+        f'<div class="words" align="{text_style.align_for(lab, "words", BILL)}">'
+        f'<span class="key">Amount in Words</span>&nbsp;: '
         f'<b>{escape(amount_in_words(net_payable(r.billing)))}</b></div>'
     )
 
@@ -293,11 +319,12 @@ def _billed_by(r: Report, lab: LabProfile) -> str:
             f'<tr><td bgcolor="{INK}" height="1" '
             'style="font-size:1px; line-height:1px;">&nbsp;</td></tr></table>'
         )
+    align = _set_align(lab, "billed_by")
     return _plain(
         "<tr>"
-        '<td class="key">Billed By</td>'
-        '<td class="colon">:</td>'
-        f'<td width="100%" class="val">{shown}</td>'
+        f'<td class="key billedby"{align}>Billed By</td>'
+        f'<td class="colon billedby"{align}>:</td>'
+        f'<td width="100%"{align} class="val billedby">{shown}</td>'
         "</tr>"
     )
 
@@ -308,11 +335,12 @@ def _notes(lab: LabProfile) -> str:
              if line.strip()]
     if not lines:
         return ""
+    align = text_style.align_for(lab, "notes", BILL)
     items = "".join(
-        f'<div class="note">{i}.&nbsp;&nbsp;{escape(line)}</div>'
+        f'<div class="note" align="{align}">{i}.&nbsp;&nbsp;{escape(line)}</div>'
         for i, line in enumerate(lines, start=1)
     )
-    return f'<div class="notehead">Note:</div>{items}'
+    return f'<div class="notehead" align="{align}">Note:</div>{items}'
 
 
 def _foot_block(r: Report, lab: LabProfile) -> str:
@@ -348,6 +376,9 @@ body {{ font-family: Arial, 'Helvetica Neue', 'Segoe UI', sans-serif;
 .tight {{ white-space: nowrap; }}
 .th {{ font-weight: bold; font-size: 7pt; white-space: nowrap; }}
 .td {{ font-size: 7pt; }}
+/* Service names print heavy. Set here rather than with a bold tag so the lab's
+   own Services styling can turn it off. */
+.svc {{ font-weight: bold; }}
 .money {{ font-size: 7pt; white-space: nowrap; }}
 .totlbl {{ font-size: 7pt; font-weight: bold; white-space: nowrap; }}
 .boxlbl {{ font-size: 7pt; white-space: nowrap; }}
@@ -360,6 +391,11 @@ body {{ font-family: Arial, 'Helvetica Neue', 'Segoe UI', sans-serif;
 .words {{ font-size: 7pt; }}
 .note {{ font-size: 6pt; }}
 """
+
+
+def stylesheet(lab: LabProfile) -> str:
+    """The bill's stylesheet with the lab's own bill text styling appended."""
+    return text_style.stylesheet(CSS, lab, BILL)
 
 
 def _band(html: str, top: int = 0, bottom: int = 0) -> str:
@@ -386,13 +422,13 @@ def build(report: Report, lab: LabProfile) -> str:
     bands = [
         _band(letterhead(lab), bottom=2),
         _band(_hrule()),
-        _band(_heading(report), top=2, bottom=2),
+        _band(_heading(report, lab), top=2, bottom=2),
         _band(_hrule()),
-        _band(_identity(report), top=2, bottom=2),
+        _band(_identity(report, lab), top=2, bottom=2),
         _band(_hrule()),
-        _band(_services(report), top=4),
-        _band(_amount_words(report), top=3),
-        _band(_closing(report), top=3),
+        _band(_services(report, lab), top=4),
+        _band(_amount_words(report, lab), top=3),
+        _band(_closing(report, lab), top=3),
     ]
 
     bands.append(_band(_foot_block(report, lab), top=5))
@@ -406,4 +442,5 @@ def build(report: Report, lab: LabProfile) -> str:
     # has an edge. It also makes a short bill read as finished rather than as a
     # page that was cut off.
     page = _box(f'<tr><td>{_plain("".join(bands))}</td></tr>', border=1, padding=6)
-    return f"<html><head><style>{CSS}</style></head><body>{page}</body></html>"
+    return (f"<html><head><style>{stylesheet(lab)}</style></head>"
+            f"<body>{page}</body></html>")

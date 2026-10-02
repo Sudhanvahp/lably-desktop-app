@@ -234,3 +234,13 @@ class HasContentTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AuditEdgeCaseTests(unittest.TestCase):
+    def test_huge_exponent_is_not_an_amount_rather_than_a_crash(self):
+        self.assertIsNone(billing.parse_amount("1e40"))
+        self.assertEqual(billing.amount_or_zero("1e40"), billing.ZERO)
+
+    def test_negative_zero_never_prints_a_sign(self):
+        self.assertEqual(billing.format_amount("-0"), "0.00")
+        self.assertEqual(billing.format_amount(Decimal("-0.00")), "0.00")

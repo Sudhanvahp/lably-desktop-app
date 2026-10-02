@@ -91,7 +91,10 @@ def verify(password: str) -> bool:
         return False
 
     candidate = _derive(password, salt, iterations)
-    return hmac.compare_digest(candidate, str(record.get("hash", "")))
+    # compare_digest raises TypeError on a non-ASCII str, which a hand-edited
+    # file can contain; comparing bytes keeps a bad record a plain "no".
+    stored = str(record.get("hash", "")).encode("utf-8")
+    return hmac.compare_digest(candidate.encode("ascii"), stored)
 
 
 def change_password(current: str, new: str) -> Optional[str]:

@@ -5,6 +5,11 @@ from typing import List, Dict, Any
 from . import text_style
 
 
+def _text(value: Any) -> str:
+    """A stored field as text; JSON null is blank, never the word "None"."""
+    return "" if value is None else str(value)
+
+
 @dataclass
 class LabProfile:
     lab_name: str = ""
@@ -34,16 +39,20 @@ class LabProfile:
     # Nested, unlike every other field here, because it is a table of slots -
     # see app.text_style.
     text_styles: Dict[str, Dict[str, str]] = field(default_factory=dict)
+    # The same, for the bill - its own regions, styled apart from the report's.
+    bill_text_styles: Dict[str, Dict[str, str]] = field(default_factory=dict)
 
     @staticmethod
     def from_dict(d: Dict[str, Any]) -> "LabProfile":
         p = LabProfile()
         for k in p.__dict__:
-            if k == "text_styles":
+            if k in ("text_styles", "bill_text_styles"):
                 continue        # a dict of dicts; str() would ruin it
             if k in d and d[k] is not None:
                 setattr(p, k, str(d[k]))
         p.text_styles = text_style.load(d.get("text_styles"))
+        p.bill_text_styles = text_style.load(d.get("bill_text_styles"),
+                                             text_style.BILL)
         return p
 
     def to_dict(self) -> Dict[str, Any]:
@@ -61,12 +70,14 @@ class TestRow:
 
     @staticmethod
     def from_dict(d: Dict[str, Any]) -> "TestRow":
+        if not isinstance(d, dict):
+            return TestRow()
         return TestRow(
-            panel=str(d.get("panel", "")),
-            name=str(d.get("name", "")),
-            result=str(d.get("result", "")),
-            unit=str(d.get("unit", "")),
-            ref=str(d.get("ref", "")),
+            panel=_text(d.get("panel")),
+            name=_text(d.get("name")),
+            result=_text(d.get("result")),
+            unit=_text(d.get("unit")),
+            ref=_text(d.get("ref")),
             kind="heading" if str(d.get("kind", "test")) == "heading" else "test",
         )
 
@@ -90,8 +101,8 @@ class BillItem:
     def from_dict(d: Dict[str, Any]) -> "BillItem":
         if not isinstance(d, dict):
             return BillItem()
-        return BillItem(service=str(d.get("service", "")),
-                        amount=str(d.get("amount", "")))
+        return BillItem(service=_text(d.get("service")),
+                        amount=_text(d.get("amount")))
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -154,10 +165,17 @@ class Report:
         for k, v in d.items():
             if k in ("rows", "panels", "billing"):
                 continue
-            if hasattr(r, k) and v is not None:
+            # Only real fields: hasattr() would also match the methods, and a
+            # stray "display_name" key in a hand-edited file would replace
+            # the method with a string and break History.
+            if k in r.__dataclass_fields__ and v is not None:
                 setattr(r, k, str(v))
-        r.panels = [str(p) for p in d.get("panels", [])]
-        r.rows = [TestRow.from_dict(x) for x in d.get("rows", [])]
+        # A null or non-list here (a hand-edited file) reads as empty rather
+        # than raising: one bad report must not stop History from loading.
+        panels = d.get("panels")
+        rows = d.get("rows")
+        r.panels = [str(p) for p in panels] if isinstance(panels, list) else []
+        r.rows = [TestRow.from_dict(x) for x in rows] if isinstance(rows, list) else []
         r.billing = Billing.from_dict(d.get("billing") or {})
         return r
 

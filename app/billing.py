@@ -105,7 +105,13 @@ def parse_amount(value: Any) -> Optional[Decimal]:
         return None
     if not amount.is_finite():
         return None
-    return amount.quantize(_CENTS, rounding=ROUND_HALF_UP)
+    try:
+        return amount.quantize(_CENTS, rounding=ROUND_HALF_UP)
+    except InvalidOperation:
+        # "1e40" is a valid Decimal but has more digits than the context can
+        # hold once it is given two decimal places; quantize raises rather than
+        # rounds. It is not an amount anyone meant, so it is not one.
+        return None
 
 
 def amount_or_zero(value: Any) -> Decimal:
@@ -118,6 +124,10 @@ def format_amount(value: Any) -> str:
     """`1234.5` -> `1,234.50`. Always two decimals, so a column of them lines up."""
     if not isinstance(value, Decimal):
         value = amount_or_zero(value)
+    if value.is_zero():
+        # "-0" typed in a box parses to Decimal("-0.00"), which formats with
+        # its sign. A bill must never print "-0.00".
+        value = abs(value)
     return f"{value:,.2f}"
 
 

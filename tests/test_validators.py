@@ -395,3 +395,8 @@ class BillNumberTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AgeDigitEdgeTests(unittest.TestCase):
+    def test_superscript_digit_is_rejected_not_a_crash(self):
+        self.assertIsNotNone(V.check_age("2²", "Y"))

@@ -80,7 +80,8 @@ def check_age(value: str, unit: str) -> Optional[str]:
     text = (value or "").strip()
     if not text:
         return "Enter the patient's age."
-    if not text.isdigit():
+    # isdecimal, not isdigit: "²" is a digit to Python but int() rejects it.
+    if not text.isdecimal():
         return "Age must be a whole number."
     limit = AGE_LIMITS.get(unit, AGE_LIMITS["Y"])
     if int(text) > limit:

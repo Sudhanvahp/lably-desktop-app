@@ -67,8 +67,12 @@ class SetPasswordDialog(_Base):
             "Saved reports open read-only. This password unlocks them for editing "
             "and is required to delete a report.\n\n"
             "It is stored only as a PBKDF2-SHA256 hash, so it cannot be read back "
-            "out of the app - if it is forgotten, the only way to reset it is to "
-            "delete security.json from the data folder.")
+            "out of the app. If it is forgotten, use Forgot Password? (on the "
+            "Laboratory Profile page, or on the password prompt) to clear it "
+            "and set a new one.")
+        # The old wording sent people to delete security.json by hand - written
+        # before the in-app reset existed, and a frightening thing to ask of
+        # counter staff when a guarded button now does the same job.
 
         self.changing = changing
         self.current = self._field("Current password:") if changing else None
@@ -107,10 +111,11 @@ class AskPasswordDialog(_Base):
         # A forgotten password used to be a dead end with no way out and no
         # explanation on screen - the recovery step was only written down in a
         # source comment. The way out is offered where it is needed.
-        forgot = self.buttons.addButton("Forgot password?",
+        forgot = self.buttons.addButton("Forgot Password?",
                                         QDialogButtonBox.HelpRole)
         forgot.setToolTip("What to do if nobody remembers the password")
         forgot.clicked.connect(self._forgot)
+        # Same label as the Laboratory Profile button the Set dialog points to.
 
     def _forgot(self):
         if reset_password_flow(self, from_unlock=True):
@@ -121,7 +126,7 @@ class AskPasswordDialog(_Base):
             self.accept()
             return
         self.attempts += 1
-        self._show_error("That password is not correct. Use Forgot password? "
+        self._show_error("That password is not correct. Use Forgot Password? "
                          "if nobody remembers it.")
         self.password.selectAll()
         self.password.setFocus()

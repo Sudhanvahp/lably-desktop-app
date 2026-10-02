@@ -73,6 +73,13 @@ def _spacer(pt: float = 4) -> str:
 FOOTER_PAD = "<!--footer-pad-->"
 
 
+def _lines(text: str) -> str:
+    """Escaped text with its line breaks kept. Qt's rich text folds a bare
+    newline into a space, so a multi-line remark would print as one run-on
+    line without the explicit <br>."""
+    return "<br>".join(escape(line) for line in text.splitlines())
+
+
 def _keyed(pairs) -> str:
     """One line of `Label: value` pairs set apart by dots; blanks are skipped."""
     parts = [f'{label}: {escape(value)}' for label, value in pairs if value]
@@ -133,7 +140,7 @@ def footer(lab: LabProfile) -> str:
     if hours:
         lines.append(hours)
     if lab.footer_note:
-        lines.append(escape(lab.footer_note))
+        lines.append(_lines(lab.footer_note))
     if not lines:
         return ""
     return (
@@ -310,7 +317,7 @@ def _remarks(text: str, lab: LabProfile) -> str:
         '<table width="100%" cellspacing="0" cellpadding="2"><tr>'
         f'<td class="remarks" align="{text_style.align_for(lab, "remarks")}">'
         f'<span class="remarks-h">Remarks:</span> '
-        f'{escape(text)}</td></tr></table>'
+        f'{_lines(text)}</td></tr></table>'
     )
 
 
@@ -429,9 +436,6 @@ class _Signatory:
         self.degrees = degrees
         self.role = role
 
-    def present(self) -> bool:
-        return bool(self.image or self.name)
-
 
 # Height of the blank left above each name for a handwritten signature, in
 # points. A signature image, when one is set, prints at the same height so the
@@ -502,7 +506,10 @@ body {{ font-family: 'Segoe UI', Calibri, Arial, sans-serif; font-size: 8pt;
 table.results th {{ font-size: 7.5pt; font-weight: normal; color: {INK_SOFT};
                     border-bottom: 1px solid {RULE_SOFT}; }}
 table.results td.panel {{ border-bottom: 1px solid {RULE}; }}
-table.results td {{ font-size: 8pt; }}
+/* No blanket `table.results td {{ font-size }}` rule here: Qt ranks selectors
+   by specificity, so one would outrank every single-class rule below (.panel,
+   td.subhead, .money) and every size the lab sets for those regions - the
+   cells already get 8pt from the body. */
 .slno {{ color: {MUTED}; }}
 .tname {{ color: {INK}; }}
 /* The result cell. It has a class purely so the lab can restyle results

@@ -144,3 +144,15 @@ class CorruptRecordTests(RecordFile, SandboxCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class NonAsciiHashTests(RecordFile, SandboxCase):
+    def test_non_ascii_hash_is_a_plain_no(self):
+        security.set_password("abcd")
+        path = security._path()
+        with open(path, encoding="utf-8") as fh:
+            record = json.load(fh)
+        record["hash"] = "é" * 64
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(record, fh)
+        self.assertFalse(security.verify("abcd"))

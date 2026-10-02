@@ -2,7 +2,8 @@
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import (
-    QHBoxLayout, QLabel, QMainWindow, QStackedWidget, QVBoxLayout, QWidget,
+    QHBoxLayout, QLabel, QMainWindow, QMessageBox, QStackedWidget, QVBoxLayout,
+    QWidget,
 )
 
 from .. import storage
@@ -23,8 +24,8 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle(f"{APP_NAME} - {APP_TAGLINE}")
-        self.resize(1280, 860)
-        self.setMinimumSize(1080, 700)
+        self.setMinimumSize(1080, 640)
+        self._fit_to_screen(1280, 860)
 
         self.form = ReportForm()
         self.history = HistoryView()
@@ -102,13 +103,16 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------ menu
     def _build_menu(self):
         file_menu = self.menuBar().addMenu("&File")
+        # The report actions belong to the New Report page. Pressed from
+        # History or Templates they used to clear / print a form nobody could
+        # see, so each one now brings that page forward first.
         for text, shortcut, slot in (
-            ("&New Report", QKeySequence.New, self.form.clear_clicked),
-            ("&Save", QKeySequence.Save, self.form.save),
-            ("Print Pre&view", "Ctrl+Shift+P", self.form.preview),
-            ("&Print", QKeySequence.Print, self.form.print_report),
-            ("Bill Previe&w", "Ctrl+Shift+B", self.form.preview_bill),
-            ("Print &Bill", "Ctrl+B", self.form.print_bill),
+            ("&New Report", QKeySequence.New, self._on_form(self.form.clear_clicked)),
+            ("&Save", QKeySequence.Save, self.save_current),
+            ("Print Pre&view", "Ctrl+Shift+P", self._on_form(self.form.preview)),
+            ("&Print", QKeySequence.Print, self._on_form(self.form.print_report)),
+            ("Bill Previe&w", "Ctrl+Shift+B", self._on_form(self.form.preview_bill)),
+            ("Print &Bill", "Ctrl+B", self._on_form(self.form.print_bill)),
         ):
             action = QAction(text, self)
             action.setShortcut(shortcut)
@@ -140,6 +144,101 @@ class MainWindow(QMainWindow):
             action.setShortcut(key)
             action.triggered.connect(lambda _=False, index=i: self.go_to(index))
             go_menu.addAction(action)
+
+    def _on_form(self, slot):
+        def run(*_):
+            self.go_to(NEW)
+            slot()
+        return run
+
+    def _fit_to_screen(self, width: int, height: int):
+        """Open at the preferred size, but never bigger than the screen.
+
+        860 px is taller than a 1366x768 laptop once the taskbar is counted, so
+        the window opened with its bottom - the footer and the pinned Save
+        buttons - hidden under the taskbar."""
+        screen = self.screen()
+        if screen is not None:
+            area = screen.availableGeometry()
+            if area.width() > 0 and area.height() > 0:
+                # leave room for the title bar, which the frame adds on top
+                width = min(width, area.width())
+                height = min(height, area.height() - 40)
+                # A 768-px screen leaves ~688 px; a fixed 700-px minimum would
+                # push the bottom back under the taskbar, so the minimum
+                # gives way to the screen too.
+                self.setMinimumSize(min(self.minimumWidth(), area.width()),
+                                    min(self.minimumHeight(), height))
+        self.resize(max(width, self.minimumWidth()),
+                    max(height, self.minimumHeight()))
+
+    def save_current(self):
+        """Ctrl+S saves the page you are looking at.
+
+        It was wired to the report form alone, so pressing it on Laboratory
+        Profile quietly saved (or complained about) a half-typed report on a
+        page nobody could see, and the profile itself stayed unsaved."""
+        if self.stack.currentIndex() == SETTINGS:
+            self.settings.save()
+        elif self.stack.currentIndex() == TEMPLATES:
+            # same trap on Test Templates: Ctrl+S there means Save Panel
+            self.templates.save_panel()
+        elif self.stack.currentIndex() == HISTORY:
+            # History has nothing to save; saving the hidden form from here
+            # would be a surprise, so say where Ctrl+S works instead.
+            self.toast.show_message(
+                "Nothing to save on this page. Open a report first, then "
+                "press Ctrl+S on the New Report page.", "info")
+        else:
+            self.form.save()
+
+    def closeEvent(self, event):
+        """Ask before throwing away an unsaved Laboratory Profile.
+
+        Only when the window is on screen: a window nobody can see has nobody
+        to answer the question."""
+        try:
+            self._confirm_close(event)
+        except Exception:
+            # Anything going wrong while asking must keep the window open:
+            # closing anyway is exactly how unsaved edits get lost.
+            event.ignore()
+
+    def _confirm_close(self, event):
+        if self.isVisible() and self.settings.has_unsaved_changes():
+            self.go_to(SETTINGS)
+            choice = QMessageBox.question(
+                self, "Unsaved Laboratory Profile",
+                "The Laboratory Profile has changes that are not saved yet.\n\n"
+                "Save them before closing?",
+                QMessageBox.Save | QMessageBox.Discard | QMessageBox.Cancel,
+                QMessageBox.Save)
+            if choice == QMessageBox.Cancel:
+                event.ignore()
+                return
+            if choice == QMessageBox.Save:
+                if not self.settings.save() or self.settings.has_unsaved_changes():
+                    # save() refused and already said why in a toast
+                    event.ignore()
+                    return
+        if self.isVisible() and self.templates.has_unsaved_changes():
+            # An edited test panel was lost on close just as silently.
+            self.go_to(TEMPLATES)
+            choice = QMessageBox.question(
+                self, "Unsaved test panel",
+                f"The panel '{self.templates.current_panel}' has changes that "
+                "are not saved yet.\n\nSave them before closing?",
+                QMessageBox.Save | QMessageBox.Discard | QMessageBox.Cancel,
+                QMessageBox.Save)
+            if choice == QMessageBox.Cancel:
+                event.ignore()
+                return
+            if choice == QMessageBox.Save:
+                self.templates.save_panel()
+                if self.templates.has_unsaved_changes():
+                    event.ignore()   # refused; the toast said why
+                    return
+        super().closeEvent(event)
 
     # ------------------------------------------------------------- navigation
     def go_to(self, index: int):

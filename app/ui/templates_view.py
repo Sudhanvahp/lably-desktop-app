@@ -67,8 +67,15 @@ class TemplatesView(QWidget):
                              "Danger")
         delete.setFixedWidth(44)
         delete.clicked.connect(self.delete_panel)
+        # The delete question promises removed built-ins can be brought back;
+        # without this button that promise pointed at nothing on screen.
+        restore = icon_button("refresh", "",
+                              "Bring back built-in panels you removed")
+        restore.setFixedWidth(44)
+        restore.clicked.connect(self.restore_removed)
         buttons.addWidget(rename)
         buttons.addWidget(delete)
+        buttons.addWidget(restore)
         card.add(buttons)
         return card
 
@@ -177,9 +184,28 @@ class TemplatesView(QWidget):
             self.current_panel = ""
             self.table.setRowCount(0)
 
-    def _panel_selected(self, current, _previous):
+    def has_unsaved_changes(self) -> bool:
+        return self._dirty and bool(self.current_panel)
+
+    def _panel_selected(self, current, previous):
         if current is None or self._loading:
             return
+        # _dirty used to be tracked and never read: clicking another panel
+        # silently threw away every edit made to this one. Ask first, and on
+        # "No" put the highlight back where the edits are.
+        if (previous is not None and self.has_unsaved_changes()
+                and previous.data(Qt.UserRole) == self.current_panel):
+            if QMessageBox.question(
+                    self, "Unsaved panel",
+                    f"'{self.current_panel}' has changes that are not saved.\n\n"
+                    "Discard them and open "
+                    f"'{current.data(Qt.UserRole)}'?",
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.No) != QMessageBox.Yes:
+                self._loading = True
+                self.panel_list.setCurrentItem(previous)
+                self._loading = False
+                return
         self.current_panel = current.data(Qt.UserRole)
         self.load_rows(templates.rows_for(self.current_panel))
         self._loading = True
@@ -381,7 +407,7 @@ class TemplatesView(QWidget):
         builtin = templates.is_builtin(self.current_panel)
         message = (f"Remove '{self.current_panel}' from the New Report page?\n\n"
                    + ("It is a built-in panel, so you can bring it back later with "
-                      "Restore All Built-ins." if builtin
+                      "the Restore button under the panel list." if builtin
                       else "This panel is yours and cannot be recovered."))
         if QMessageBox.question(self, "Remove panel", message,
                                 QMessageBox.Yes | QMessageBox.No,
@@ -390,11 +416,22 @@ class TemplatesView(QWidget):
         gone = self.current_panel
         templates.delete_panel(gone)
         self.current_panel = ""
+        self._dirty = False   # the edits went with the panel
         self.panels_changed.emit()
         self.reload()
         self.notify.emit(f"'{gone}' removed.", "success")
 
     def reset_panel(self):
+        # Reset throws away every change ever saved to the panel, so it is
+        # confirmed like the other destructive actions on this page.
+        if templates.is_builtin(self.current_panel) and QMessageBox.question(
+                self, "Reset panel",
+                f"Restore '{self.current_panel}' to the tests it shipped with?"
+                "\n\nYour changes to this panel, saved or not, will be lost.",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No) != QMessageBox.Yes:
+            return
+        self._dirty = False
         if not templates.reset_panel(self.current_panel):
             self.notify.emit("Only built-in panels have a default to restore.",
                              "warning")
@@ -437,3 +474,24 @@ class TemplatesView(QWidget):
         self.notify.emit(
             f"'{self.current_panel}' saved - {len(rows)} row(s). "
             "New reports will use it from now on.", "success")
+
+    def restore_removed(self):
+        """Bring back removed built-in panels, leaving edited ones as they are."""
+        removed = [n for n in templates.default_panel_names()
+                   if n not in templates.panel_names()]
+        if not removed:
+            self.notify.emit("No built-in panels have been removed - "
+                             "there is nothing to restore.", "info")
+            return
+        if QMessageBox.question(
+                self, "Restore panels",
+                "Bring back these removed built-in panels?\n\n"
+                + "\n".join(removed),
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.Yes) != QMessageBox.Yes:
+            return
+        for name in removed:
+            templates.reset_panel(name)
+        self.panels_changed.emit()
+        self.reload()
+        self.notify.emit(f"{len(removed)} built-in panel(s) restored.", "success")

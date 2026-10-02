@@ -2703,3 +2703,196 @@ class TextAppearanceTests(UICase):
         bill = bill_html.build(sample_document(),
                                self.settings.current_profile())
         self.assertNotIn("Georgia", bill)
+
+
+class FormHistoryAuditTests(UICase):
+    """Regressions from the report form / history audit."""
+
+    def test_refreshing_panels_keeps_a_locked_report_locked(self):
+        self.fill()
+        self.form.save()
+        self.form.load_report(self.storage.load_report(self.form.current_id))
+        self.form.refresh_panels()
+        self.assertTrue(all(not cb.isEnabled()
+                            for cb in self.form.panel_boxes.values()))
+
+    def test_new_report_from_a_female_patient_keeps_its_loading_guard(self):
+        self.form.f_sex.setCurrentText("F")
+        seen = []
+        original = self.form._sex_changed
+
+        def spy():
+            original()
+            seen.append(self.form._loading)
+        self.form.f_sex.currentTextChanged.disconnect()
+        self.form.f_sex.currentTextChanged.connect(spy)
+        self.form.new_report()
+        self.assertEqual(seen, [True])
+
+    def test_history_selection_follows_the_report_across_a_search(self):
+        for name in NAMES[:3]:
+            self.form.new_report()
+            self.fill(name=name)
+            self.form.save()
+        self.history.reload()
+        self.history.table.selectRow(2)
+        wanted = self.history._current_id()
+        name = [e for e in self.history.entries if e["id"] == wanted][0]["patient_name"]
+        self.history.search.setText(name)
+        self.assertEqual(self.history._current_id(), wanted)
+        self.history.search.setText("")
+        self.assertEqual(self.history._current_id(), wanted)
+
+    def test_a_filtered_out_selection_is_cleared(self):
+        for name in NAMES[:2]:
+            self.form.new_report()
+            self.fill(name=name)
+            self.form.save()
+        self.history.reload()
+        self.history.table.selectRow(0)
+        hidden = self.history._current_id()
+        other = [e for e in self.history.entries if e["id"] != hidden][0]
+        self.history.search.setText(other["patient_name"])
+        self.assertEqual(self.history.table.currentRow(), -1)
+
+
+class ProfilePageAuditTests(UICase):
+    """Fixes from the Laboratory Profile / shell audit."""
+
+    def test_bill_preview_follows_the_bill_notes_as_typed(self):
+        settings = self.window.settings
+        settings.bill_notes.setPlainText("Collect within seven days")
+        self.assertIn("Collect within seven days",
+                      settings.bill_preview.toPlainText())
+
+    def test_a_bad_phone_number_focuses_the_phone_not_the_lab_name(self):
+        settings = self.window.settings
+        settings.edits["lab_name"].setText("Test Lab")
+        settings.edits["phone"].setText("123")
+        self.assertIs(settings._field_for("That laboratory phone number is "
+                                          "not a valid Indian number"),
+                      settings.edits["phone"])
+        self.assertIs(settings._field_for("Enter the laboratory name before "
+                                          "saving."),
+                      settings.edits["lab_name"])
+
+    def test_report_and_bill_appearance_share_one_tabbed_card(self):
+        settings = self.window.settings
+        tabs = settings.appearance_tabs
+        self.assertEqual([tabs.tabText(i) for i in range(tabs.count())],
+                         ["Report", "Cash Bill"])
+        self.assertTrue(tabs.widget(0).isAncestorOf(settings.preview))
+        self.assertTrue(tabs.widget(1).isAncestorOf(settings.bill_preview))
+
+    def test_unsaved_profile_changes_are_tracked_until_saved(self):
+        settings = self.window.settings
+        self.assertFalse(settings.has_unsaved_changes())
+        settings.edits["address1"].setText("#42, MG Road")
+        self.assertTrue(settings.has_unsaved_changes())
+        settings.save()
+        self.assertFalse(settings.has_unsaved_changes())
+
+    def test_ctrl_s_saves_the_page_on_screen(self):
+        from app.ui.main_window import SETTINGS
+        self.window.go_to(SETTINGS)
+        self.window.settings.edits["address1"].setText("#42, MG Road")
+        self.window.save_current()
+        self.assertEqual(self.storage.load_profile().address1, "#42, MG Road")
+
+
+class SecondPassUITests(UICase):
+    """Second UI audit: lost edits, hidden-page shortcuts, failed saves."""
+
+    def answer(self, reply):
+        from PySide6.QtWidgets import QMessageBox
+        original = QMessageBox.question
+        QMessageBox.question = staticmethod(lambda *a, **k: reply)
+        self.addCleanup(setattr, QMessageBox, "question", original)
+
+    def test_switching_panel_with_unsaved_edits_can_be_cancelled(self):
+        from PySide6.QtWidgets import QMessageBox
+        page = self.window.templates
+        page.panel_list.setCurrentRow(0)
+        first = page.current_panel
+        page.add_test()
+        self.answer(QMessageBox.No)
+        page.panel_list.setCurrentRow(1)
+        self.assertEqual(page.current_panel, first)
+        self.assertTrue(page.has_unsaved_changes())
+        self.assertEqual(page.panel_list.currentRow(), 0)
+
+    def test_switching_panel_and_discarding_moves_on(self):
+        from PySide6.QtWidgets import QMessageBox
+        page = self.window.templates
+        page.panel_list.setCurrentRow(0)
+        page.add_test()
+        self.answer(QMessageBox.Yes)
+        page.panel_list.setCurrentRow(1)
+        self.assertFalse(page.has_unsaved_changes())
+        self.assertEqual(page.panel_list.currentRow(), 1)
+
+    def test_reset_panel_asks_first(self):
+        from PySide6.QtWidgets import QMessageBox
+        from app import templates
+        page = self.window.templates
+        rows = templates.rows_for(CBC)
+        rows[0]["unit"] = "zz"
+        templates.save_panel(CBC, rows)
+        page.reload(select=CBC)
+        self.answer(QMessageBox.No)
+        page.reset_panel()
+        self.assertTrue(templates.is_modified(CBC))
+
+    def test_restore_brings_back_removed_built_in(self):
+        from PySide6.QtWidgets import QMessageBox
+        from app import templates
+        templates.delete_panel(CBC)
+        self.answer(QMessageBox.Yes)
+        self.window.templates.restore_removed()
+        self.assertIn(CBC, templates.panel_names())
+        self.assertIn(CBC, self.form.panel_boxes)
+
+    def test_ctrl_s_on_templates_saves_the_panel(self):
+        from app.ui.main_window import TEMPLATES
+        page = self.window.templates
+        page.panel_list.setCurrentRow(0)
+        page.add_test()
+        self.window.go_to(TEMPLATES)
+        self.window.save_current()
+        self.assertFalse(page.has_unsaved_changes())
+
+    def test_new_report_shortcut_shows_the_form(self):
+        from app.ui.main_window import HISTORY, NEW
+        self.window.go_to(HISTORY)
+        action = [a for a in self.window.menuBar().actions()[0].menu().actions()
+                  if a.text() == "&New Report"][0]
+        action.trigger()
+        self.assertEqual(self.window.stack.currentIndex(), NEW)
+
+    def test_profile_save_failure_is_reported_not_raised(self):
+        from app import storage
+        settings = self.window.settings
+        original = storage.save_profile
+
+        def boom(_profile):
+            raise OSError(28, "No space left on device")
+        storage.save_profile = boom
+        self.addCleanup(setattr, storage, "save_profile", original)
+        settings.edits["lab_name"].setText("Other Lab")
+        self.assertFalse(settings.save())
+        self.assertEqual(self.last_message()[1], "error")
+        self.assertIn("writable", self.last_message()[0])
+        self.assertTrue(settings.has_unsaved_changes())
+
+    def test_problem_routing_uses_exact_labels(self):
+        settings = self.window.settings
+        self.assertIs(settings._field_for("Bill note 2 is too long."),
+                      settings.bill_notes)
+        self.assertIs(settings._field_for(
+            "Cannot write to the backup folder: denied"), settings.backup_edit)
+        self.assertIs(settings._field_for("Footer note is too long."),
+                      settings.edits["footer_note"])
+
+    def test_sidebar_tooltips_mention_shortcuts(self):
+        for i, button in enumerate(self.window.nav.buttons):
+            self.assertIn(f"Ctrl+{i + 1}", button.toolTip())

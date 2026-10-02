@@ -529,3 +529,14 @@ class SignatoryTests(unittest.TestCase):
     def test_names_are_escaped(self):
         html = build(sample_report(), sample_profile(technician="<i>x</i>"))
         self.assertNotIn("<i>x</i>", html)
+
+
+class LineBreakTests(unittest.TestCase):
+    def test_multi_line_remarks_keep_their_breaks_and_stay_escaped(self):
+        html = build(sample_report(remarks="Repeat <b>\nFasting"), sample_profile())
+        self.assertIn("Repeat &lt;b&gt;<br>Fasting", html)
+
+    def test_multi_line_footer_note_keeps_its_breaks(self):
+        lab = sample_profile()
+        lab.footer_note = "Line one\nLine two"
+        self.assertIn("Line one<br>Line two", build(sample_report(), lab))

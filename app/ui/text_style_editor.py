@@ -54,14 +54,19 @@ class TextStyleEditor(QWidget):
 
     changed = Signal()
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, doc: str = TS.REPORT):
         super().__init__(parent)
+        # Which document this editor styles: the report and the bill each
+        # have their own regions and their own stored table.
+        self.doc = doc
+        self._slots = TS.slots_for(doc)
+        self._by_key = TS.by_key(doc)
         self._styles = {}
         self._loading = False
 
         self.picker = T.style_combo(QComboBox())
         self.picker.setMinimumWidth(240)
-        for slot in TS.SLOTS:
+        for slot in self._slots:
             self.picker.addItem(slot.label, slot.key)
         self.picker.currentIndexChanged.connect(self._show_slot)
 
@@ -211,7 +216,7 @@ class TextStyleEditor(QWidget):
 
     # ------------------------------------------------------------------ state
     def slot_key(self) -> str:
-        return self.picker.currentData() or TS.SLOTS[0].key
+        return self.picker.currentData() or self._slots[0].key
 
     def styles(self) -> dict:
         """What to store on the profile: a copy, so the caller cannot edit ours
@@ -220,7 +225,7 @@ class TextStyleEditor(QWidget):
 
     def set_styles(self, styles) -> None:
         self._styles = {key: dict(value)
-                        for key, value in TS.load(styles).items()}
+                        for key, value in TS.load(styles, self.doc).items()}
         self._show_slot()
 
     # ------------------------------------------------------------- the screen
@@ -232,8 +237,8 @@ class TextStyleEditor(QWidget):
         redraw would write the region it had only just read.
         """
         key = self.slot_key()
-        slot = TS.BY_KEY[key]
-        style = TS.effective(_Holder(self._styles), key)
+        slot = self._by_key[key]
+        style = TS.effective(_Holder(self._styles, self.doc), key, self.doc)
 
         self._loading = True
         self.align_buttons[style.align or slot.align].setChecked(True)
@@ -255,14 +260,14 @@ class TextStyleEditor(QWidget):
         actually has - "what have I changed?" - because the controls always show
         something, whether it was chosen or merely inherited."""
         key = self.slot_key()
-        holder = _Holder(self._styles)
-        mine = TS.summary(holder, key)
-        styled = TS.styled_slots(holder)
+        holder = _Holder(self._styles, self.doc)
+        mine = TS.summary(holder, key, self.doc)
+        styled = TS.styled_slots(holder, self.doc)
         self.reset_one.setEnabled(bool(self._styles.get(key)))
         self.reset_all.setEnabled(bool(styled))
         if styled:
-            names = ", ".join(TS.BY_KEY[k].label for k in styled)
-            overall = f"{len(styled)} of {len(TS.SLOTS)} customised: {names}."
+            names = ", ".join(self._by_key[k].label for k in styled)
+            overall = f"{len(styled)} of {len(self._slots)} customised: {names}."
         else:
             overall = ("Nothing customised - every line prints in the standard "
                        "layout.")
@@ -272,7 +277,7 @@ class TextStyleEditor(QWidget):
         # again without opening each one in turn.
         for i in range(self.picker.count()):
             slot_key = self.picker.itemData(i)
-            label = TS.BY_KEY[slot_key].label
+            label = self._by_key[slot_key].label
             self.picker.setItemText(
                 i, f"{label}  *" if slot_key in styled else label)
 
@@ -334,7 +339,7 @@ class TextStyleEditor(QWidget):
             underline=(TS.ON if self.effect_buttons["underline"].isChecked()
                        else TS.OFF),
         )
-        kept = TS.trimmed(key, style)
+        kept = TS.trimmed(key, style, self.doc)
         if kept:
             self._styles[key] = kept
         else:
@@ -360,5 +365,6 @@ class _Holder:
     exactly the right shape for the saved profile and the wrong shape for a
     half-finished edit. This is the one attribute it needs."""
 
-    def __init__(self, styles):
+    def __init__(self, styles, doc: str = TS.REPORT):
         self.text_styles = styles
+        self.bill_text_styles = styles if doc == TS.BILL else {}

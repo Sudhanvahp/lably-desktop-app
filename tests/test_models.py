@@ -36,6 +36,14 @@ class ReportTests(unittest.TestCase):
         restored = Report.from_dict(original.to_dict())
         self.assertEqual(restored.to_dict(), original.to_dict())
 
+    def test_a_key_named_like_a_method_does_not_replace_it(self):
+        data = self.make().to_dict()
+        data["display_name"] = "oops"
+        data["index_entry"] = "oops"
+        restored = Report.from_dict(data)
+        self.assertEqual(restored.display_name(), "Jane")
+        self.assertEqual(restored.index_entry()["patient_name"], "Jane")
+
     def test_rows_become_testrow_objects_not_dicts(self):
         restored = Report.from_dict(self.make().to_dict())
         self.assertIsInstance(restored.rows[0], TestRow)
@@ -219,3 +227,16 @@ class LabProfileTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CorruptFieldTests(unittest.TestCase):
+    def test_null_lists_and_bad_rows_read_as_empty(self):
+        r = Report.from_dict({"patient_name": "A", "panels": None,
+                              "rows": [None, {"name": "Hb"}]})
+        self.assertEqual(r.panels, [])
+        self.assertEqual([x.name for x in r.rows], ["", "Hb"])
+        self.assertEqual(Report.from_dict({"rows": None}).rows, [])
+
+    def test_null_fields_are_blank_not_the_word_none(self):
+        self.assertEqual(TestRow.from_dict({"result": None}).result, "")
+        self.assertEqual(BillItem.from_dict({"amount": None}).amount, "")

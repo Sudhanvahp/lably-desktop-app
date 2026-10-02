@@ -40,15 +40,17 @@ def make_heading(name: str) -> Dict[str, str]:
 
 
 def clean_row(raw: Any) -> Dict[str, str]:
-    """Coerce anything read off disk into a well-formed row."""
+    """Coerce anything read off disk into a well-formed row. A null field
+    (a hand-edited panels.json) reads as blank, never as the text "None"."""
     if not isinstance(raw, dict):
         return make_heading("")
     kind = HEADING if str(raw.get("kind", TEST)) == HEADING else TEST
-    name = str(raw.get("name", "")).strip()
+    name = str(raw.get("name") or "").strip()
     if kind == HEADING:
         return make_heading(name)
-    return make_test(name, str(raw.get("unit", "")).strip(),
-                     str(raw.get("ref_m", "")).strip(), str(raw.get("ref_f", "")).strip())
+    return make_test(name, str(raw.get("unit") or "").strip(),
+                     str(raw.get("ref_m") or "").strip(),
+                     str(raw.get("ref_f") or "").strip())
 
 
 def ref_for(row: Dict[str, str], sex: str) -> str:
@@ -103,8 +105,9 @@ def load_overlay() -> Dict[str, Any]:
     if isinstance(data.get("order"), list):
         overlay["order"] = [str(x) for x in data["order"]]
     if isinstance(data.get("prices"), dict):
+        # A null price (hand-edited file) means "no price", not the text "None".
         overlay["prices"] = {str(k): str(v).strip() for k, v in data["prices"].items()
-                             if str(v).strip()}
+                             if v is not None and str(v).strip()}
     return overlay
 
 

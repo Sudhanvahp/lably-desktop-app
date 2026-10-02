@@ -514,3 +514,27 @@ class ReportIdTests(SandboxCase):
         finally:
             uuid.uuid4 = original
         self.assertNotEqual(fresh, taken)
+
+
+class AuditStorageTests(SandboxCase):
+    def test_failed_write_leaves_no_tmp_and_keeps_the_original(self):
+        path = os.path.join(self.storage.app_dir(), "x.json")
+        self.storage._write_json(path, {"a": 1})
+        with self.assertRaises(TypeError):
+            self.storage._write_json(path, {"a": object()})
+        self.assertFalse(os.path.exists(path + ".tmp"))
+        self.assertEqual(self.storage._read_json(path, None), {"a": 1})
+
+    def test_stray_non_object_in_index_is_ignored(self):
+        self.storage._write_json(os.path.join(self.storage.app_dir(), "index.json"),
+                                 [None, 3, {"id": "x", "report_no": "BR-000005"}])
+        self.storage.clear_cache()
+        self.assertEqual(len(self.storage.load_index()), 1)
+        self.assertEqual(self.storage.peek_report_no(), "BR-000006")
+
+    def test_undeletable_report_stays_in_the_index(self):
+        from unittest import mock
+        r = self.storage.save_report(self.make_report("Locked"))
+        with mock.patch("app.storage.os.remove", side_effect=PermissionError):
+            self.assertEqual(self.storage.delete_reports([r.id]), 0)
+        self.assertIn(r.id, [e["id"] for e in self.storage.load_index()])

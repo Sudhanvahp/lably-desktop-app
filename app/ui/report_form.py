@@ -417,6 +417,11 @@ class ReportForm(QWidget):
                 cb.setChecked(True)
                 cb.blockSignals(False)
                 self._style_chip(name, True)
+        # The rebuilt chips are born enabled. On a locked report that would let
+        # the operator tick a panel into a finished record, so they follow the
+        # lock exactly as the originals did.
+        for cb in self.panel_boxes.values():
+            cb.setEnabled(not self.read_only)
 
     def _style_chip(self, panel: str, checked: bool):
         """Light the whole chip, not just the tick, so a selected panel reads
@@ -1087,6 +1092,9 @@ class ReportForm(QWidget):
         sex = self.f_sex.currentText()
         if not self._loading and self.f_title.currentText() not in titles_for(sex):
             self.f_title.setCurrentText(default_title(sex))
+        # Restore, not reset: new_report changes the sex while it is itself
+        # loading, and clearing the flag here would end its guard early.
+        was_loading = self._loading
         self._loading = True
         for r in range(self.table.rowCount()):
             name_item = self.table.item(r, 0)
@@ -1097,7 +1105,7 @@ class ReportForm(QWidget):
                 if row["name"] == name_item.text() and row.get("kind") != "heading":
                     self.table.item(r, 3).setText(templates.ref_for(row, sex))
                     break
-        self._loading = False
+        self._loading = was_loading
         for r in range(self.table.rowCount()):
             self._restyle_row(r)
 
@@ -1426,7 +1434,11 @@ class ReportForm(QWidget):
     def export_pdf(self):
         if not self._validate():
             return
-        default = f"{self.f_name.text().strip() or 'report'}.pdf".replace(" ", "_")
+        # Same naming as History's export, and made safe: a name is typed by
+        # the operator and must not be able to produce an invalid file name.
+        default = safe_filename(
+            f"{self.current_report_no or self.l_report_no.text()}_"
+            f"{self.f_name.text().strip() or 'report'}") + ".pdf"
         path, _ = QFileDialog.getSaveFileName(self, "Export PDF", default, "PDF (*.pdf)")
         if path:
             printing.export_pdf(self._html(), path)
